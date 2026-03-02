@@ -2,16 +2,26 @@ import { auth } from '@/auth'
 import { SignJWT } from 'jose'
 import { NextResponse } from 'next/server'
 
-// Issues a short-lived JWT for authenticating the WebSocket connection
-// to the Bridge Server. The Bridge validates it using the same NEXTAUTH_SECRET.
 export async function GET() {
   const session = await auth()
   if (!session?.user?.id) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET!)
+  // If OpenClaw gateway is configured, return direct connection config.
+  // BridgeProvider connects straight to the gateway, bypassing the bridge server.
+  const gatewayUrl   = process.env.OPENCLAW_GATEWAY_URL
+  const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN
+  if (gatewayUrl && gatewayToken) {
+    return NextResponse.json({
+      mode:    'direct',
+      url:     gatewayUrl,
+      token:   gatewayToken,
+    })
+  }
 
+  // Fallback: issue a short-lived JWT for the local bridge server
+  const secret = new TextEncoder().encode(process.env.NEXTAUTH_SECRET!)
   const token = await new SignJWT({
     sub:   session.user.id,
     email: session.user.email,
@@ -22,5 +32,5 @@ export async function GET() {
     .setExpirationTime('4h')
     .sign(secret)
 
-  return NextResponse.json({ token })
+  return NextResponse.json({ mode: 'bridge', token })
 }

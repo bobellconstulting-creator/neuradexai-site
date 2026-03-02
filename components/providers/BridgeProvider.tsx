@@ -64,8 +64,12 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   const [messages,      setMessages]      = useState<Record<string, Message[]>>({})
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({})
 
-  const bridgeUrl = process.env.NEXT_PUBLIC_BRIDGE_URL
+  const bridgeUrl  = process.env.NEXT_PUBLIC_BRIDGE_URL
   const isMockMode = !bridgeUrl
+
+  // Tracks the last agent that sent — used to route tokens in direct mode
+  // where OpenClaw responses don't include agentId
+  const activeAgentRef = useRef<string>('main')
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -142,19 +146,80 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
 
     setBridgeStatus('connecting')
 
-    // Fetch a short-lived token from our API
-    let token: string
+    // Fetch connection config — returns either direct gateway or bridge JWT
+    let cfg: { mode: string; url?: string; token: string }
     try {
       const res = await fetch('/api/bridge-token')
-      if (!res.ok) throw new Error('token fetch failed')
-      ;({ token } = await res.json())
+      if (!res.ok) throw new Error('config fetch failed')
+      cfg = await res.json()
     } catch {
-      console.error('[Bridge] Could not obtain bridge token')
+      console.error('[Bridge] Could not obtain connection config')
       setBridgeStatus('disconnected')
       return
     }
 
-    const ws = new WebSocket(`${bridgeUrl}?token=${encodeURIComponent(token)}`)
+    // ── Direct mode: connect straight to OpenClaw gateway ─────────────────
+    if (cfg.mode === 'direct' && cfg.url) {
+      console.log('[Bridge] Direct gateway mode:', cfg.url)
+      const ws = new WebSocket(cfg.url)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        // OpenClaw handshake
+        ws.send(JSON.stringify({ msg: 'connect', token: cfg.token }))
+        setBridgeStatus('connected')
+        console.log('[Bridge] Direct gateway connected')
+      }
+
+      ws.onmessage = (ev) => {
+        const agentId = activeAgentRef.current
+        try {
+          const msg = JSON.parse(ev.data as string)
+          // OpenClaw may or may not include agentId — fall back to active agent
+          const aid = msg.agentId ?? agentId
+          switch (msg.type) {
+            case 'token':
+            case 'chunk':
+            case 'delta':
+              setAgentStatuses((prev) => ({ ...prev, [aid]: 'responding' }))
+              appendToken(aid, msg.content ?? msg.text ?? msg.delta ?? '')
+              break
+            case 'done':
+            case 'end':
+            case 'finish':
+              finalizeStream(aid)
+              break
+            case 'message':
+              appendToken(aid, msg.content ?? msg.text ?? '')
+              finalizeStream(aid)
+              break
+            case 'status':
+              setAgentStatuses((prev) => ({ ...prev, [aid]: msg.status }))
+              break
+            case 'error':
+              console.error(`[Gateway:${aid}]`, msg.message)
+              finalizeStream(aid)
+              break
+          }
+        } catch {
+          // Plain-text token (non-JSON)
+          if (typeof ev.data === 'string' && ev.data.length > 0) {
+            appendToken(agentId, ev.data)
+          }
+        }
+      }
+
+      ws.onerror = (e) => console.error('[Gateway] WS error', e)
+      ws.onclose = () => {
+        setBridgeStatus('disconnected')
+        wsRef.current = null
+        reconnectTimer.current = setTimeout(connect, 3000)
+      }
+      return
+    }
+
+    // ── Bridge mode: connect via local bridge server with JWT ──────────────
+    const ws = new WebSocket(`${bridgeUrl}?token=${encodeURIComponent(cfg.token)}`)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -188,14 +253,10 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    ws.onerror = (e) => {
-      console.error('[Bridge] WebSocket error', e)
-    }
-
+    ws.onerror = (e) => console.error('[Bridge] WebSocket error', e)
     ws.onclose = () => {
       setBridgeStatus('disconnected')
       wsRef.current = null
-      // Auto-reconnect after 3s
       reconnectTimer.current = setTimeout(connect, 3000)
     }
   }, [bridgeUrl, sessionStatus, appendToken, finalizeStream])
@@ -224,6 +285,8 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
   // ── Real WS send ──────────────────────────────────────────────────────────
 
   const realSend = useCallback((agentId: string, content: string) => {
+    activeAgentRef.current = agentId
+
     const userMsg: Message = {
       id:        `${Date.now()}-u`,
       role:      'user',
@@ -238,7 +301,9 @@ export function BridgeProvider({ children }: { children: React.ReactNode }) {
     setAgentStatuses((prev) => ({ ...prev, [agentId]: 'thinking' }))
 
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'msg', agentId, content }))
+      // Switch agent (direct gateway mode) then send message
+      wsRef.current.send(`/agent ${agentId}`)
+      wsRef.current.send(JSON.stringify({ type: 'message', content }))
     } else {
       console.warn('[Bridge] Not connected — message dropped')
       setAgentStatuses((prev) => ({ ...prev, [agentId]: 'idle' }))
