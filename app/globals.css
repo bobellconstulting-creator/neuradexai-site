@@ -1,28 +1,6 @@
-/* ── Google Fonts — BuckGrid Pro ───────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=DM+Sans:wght@400;600;700&family=DM+Mono&display=swap');
-
-/* ── Mapbox ─────────────────────────────────────────────────── */
-@import 'mapbox-gl/dist/mapbox-gl.css';
-@import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-/* ── BuckGrid Pro — Glass UI ─────────────────────────────── */
-.glass {
-  background: rgba(15, 15, 15, 0.98);
-  backdrop-filter: blur(15px);
-  -webkit-backdrop-filter: blur(15px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #fff;
-  z-index: 2000;
-}
-
-/* Hide Leaflet attribution (optional) */
-.leaflet-control-attribution {
-  display: none !important;
-}
 
 /* ── Base Layer ─────────────────────────────────────────────────── */
 @layer base {
