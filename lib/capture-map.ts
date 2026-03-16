@@ -1,4 +1,4 @@
-import type mapboxgl from "mapbox-gl"
+import html2canvas from "html2canvas"
 
 export interface MapBounds {
   sw: [number, number] // [longitude, latitude]
@@ -10,18 +10,28 @@ export interface MapCapture {
   bounds: MapBounds
 }
 
+interface LeafletLikeBoundsPoint {
+  lng: number
+  lat: number
+}
+
+interface LeafletLikeBounds {
+  getSouthWest(): LeafletLikeBoundsPoint
+  getNorthEast(): LeafletLikeBoundsPoint
+}
+
+interface LeafletLikeMap {
+  whenReady(fn: () => void): void
+  getBounds(): LeafletLikeBounds
+  getContainer(): HTMLElement
+}
+
 /**
- * Captures the current Mapbox map canvas as a base64 PNG and extracts bounds.
- * Must be called after the map has fully loaded (map.loaded() === true).
+ * Captures the current Leaflet map container as a base64 PNG and extracts bounds.
  */
-export async function captureMapImage(mapInstance: mapboxgl.Map): Promise<MapCapture> {
-  // Ensure map is fully rendered before capturing
+export async function captureMapImage(mapInstance: LeafletLikeMap): Promise<MapCapture> {
   await new Promise<void>((resolve) => {
-    if (mapInstance.loaded()) {
-      resolve()
-    } else {
-      mapInstance.once("idle", () => resolve())
-    }
+    mapInstance.whenReady(() => resolve())
   })
 
   const b = mapInstance.getBounds()!
@@ -30,7 +40,13 @@ export async function captureMapImage(mapInstance: mapboxgl.Map): Promise<MapCap
     ne: [b.getNorthEast().lng, b.getNorthEast().lat],
   }
 
-  const canvas = mapInstance.getCanvas()
+  const container = mapInstance.getContainer()
+  const canvas = await html2canvas(container, {
+    useCORS: true,
+    backgroundColor: null,
+    logging: false,
+  })
+
   const imageBase64 = canvas
     .toDataURL("image/png")
     .replace("data:image/png;base64,", "")

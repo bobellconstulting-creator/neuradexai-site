@@ -5,6 +5,33 @@ import { NextRequest } from "next/server"
 export const runtime = "nodejs"
 export const maxDuration = 60
 
+const GOOGLE_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+
+function getTonyModelConfig() {
+  if (process.env.NEURADEX_GOOGLE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY) {
+    return {
+      provider: "google",
+      apiKey:
+        process.env.NEURADEX_GOOGLE_API_KEY ||
+        process.env.GOOGLE_API_KEY ||
+        process.env.GEMINI_API_KEY!,
+      model: "gemini-2.5-flash",
+      baseURL: GOOGLE_OPENAI_BASE_URL,
+    }
+  }
+
+  if (process.env.OPENAI_API_KEY) {
+    return {
+      provider: "openai",
+      apiKey: process.env.OPENAI_API_KEY,
+      model: "gpt-4o",
+      baseURL: undefined as string | undefined,
+    }
+  }
+
+  return null
+}
+
 interface TonyRequestBody {
   imageBase64?: string
   boundaryGeoJSON: object
@@ -13,18 +40,24 @@ interface TonyRequestBody {
   region: string
   state: string
   messages?: Array<{ role: "user" | "assistant"; content: string }>
+  stream?: boolean
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body: TonyRequestBody = await req.json()
-    const { imageBase64, boundaryGeoJSON, mapBounds, acreage, region, state, messages } = body
+    const { imageBase64, boundaryGeoJSON, mapBounds, acreage, region, state, messages, stream = true } = body
 
-    if (!process.env.OPENAI_API_KEY) {
-      return new Response("OPENAI_API_KEY is not configured", { status: 500 })
+    const modelConfig = getTonyModelConfig()
+    if (!modelConfig) {
+      return new Response("No Tony vision model is configured", { status: 500 })
     }
 
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    const client = new OpenAI({
+      apiKey: modelConfig.apiKey,
+      baseURL: modelConfig.baseURL,
+      timeout: 45000,
+    })
 
     // Build user message content
     const userContent: OpenAI.ChatCompletionContentPart[] = []
@@ -68,9 +101,25 @@ Coordinates are [longitude, latitude] — longitude always first.
       { role: "user", content: userContent },
     ]
 
+    if (!stream) {
+      const completion = await client.chat.completions.create({
+        model: modelConfig.model,
+        max_tokens: 1200,
+        messages: [
+          { role: "system", content: TONY_SYSTEM_PROMPT },
+          ...conversationMessages,
+        ],
+      })
+
+      const reply = completion.choices[0]?.message?.content || "No reply."
+      return new Response(JSON.stringify({ reply }), {
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
     // Stream response
-    const stream = await client.chat.completions.create({
-      model: "gpt-4o",
+    const streamResult = await client.chat.completions.create({
+      model: modelConfig.model,
       max_tokens: 4096,
       stream: true,
       messages: [
@@ -83,7 +132,7 @@ Coordinates are [longitude, latitude] — longitude always first.
     const readable = new ReadableStream({
       async start(controller) {
         try {
-          for await (const chunk of stream) {
+          for await (const chunk of streamResult) {
             const text = chunk.choices[0]?.delta?.content ?? ""
             if (text) {
               controller.enqueue(

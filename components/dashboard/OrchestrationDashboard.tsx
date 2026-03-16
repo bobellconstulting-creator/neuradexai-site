@@ -169,6 +169,16 @@ function Sidebar({ active, setActive }: { active: string; setActive: (id: string
         </div>
       </div>
       <nav style={{ flex:1, padding:'10px 0' }}>
+        {/* Mission Control — primary link */}
+        <a href="/mission-control" style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 20px', margin:'8px 12px', background:'rgba(0,212,255,0.08)', border:'1px solid rgba(0,212,255,0.3)', borderRadius:8, textDecoration:'none', boxShadow:'0 0 16px rgba(0,212,255,0.1)', transition:'all 0.2s' }}>
+          <span style={{ fontSize:16 }}>⬡</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontFamily:'Space Grotesk', fontSize:13, fontWeight:700, color:'#00d4ff', letterSpacing:'0.04em' }}>MISSION CONTROL</div>
+            <div style={{ fontSize:9, color:'rgba(0,212,255,0.5)', letterSpacing:'0.14em', marginTop:2 }}>JARVIS LIVE</div>
+          </div>
+          <div style={{ width:6, height:6, borderRadius:'50%', background:'#10b981', boxShadow:'0 0 6px #10b981' }} />
+        </a>
+        <div style={{ height:1, background:'rgba(0,212,255,0.08)', margin:'10px 20px' }} />
         {NAV_ITEMS.map(item => {
           const on = active === item.id
           return (

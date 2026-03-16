@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import dynamic from 'next/dynamic'
 import ToolGrid from './ToolGrid'
 import TonyChat, { type TonyChatHandle } from './TonyChat'
@@ -19,6 +19,17 @@ export default function BuckGridProPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
+  const [searchLabel, setSearchLabel] = useState('')
+  const [viewportWidth, setViewportWidth] = useState(1600)
+  const isTablet = viewportWidth < 1400
+  const isMobile = viewportWidth < 960
+
+  useEffect(() => {
+    const syncViewport = () => setViewportWidth(window.innerWidth)
+    syncViewport()
+    window.addEventListener('resize', syncViewport)
+    return () => window.removeEventListener('resize', syncViewport)
+  }, [])
 
   const onLockBorder = useCallback(async () => {
     const result = await mapRef.current?.lockBoundary()
@@ -52,14 +63,19 @@ export default function BuckGridProPage() {
     setSearching(true)
     setSearchError('')
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`
-      const res = await fetch(url, { headers: { 'User-Agent': 'BuckGridPro/1.0' } })
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`)
       const data = await res.json()
-      if (data && data[0]) {
-        const { lat, lon } = data[0]
-        mapRef.current?.flyTo([parseFloat(lat), parseFloat(lon)], 15)
+      if (res.ok && typeof data?.lat === 'number' && typeof data?.lon === 'number') {
+        setSearchLabel(data.label || q)
+        setActiveTool(TOOLS[0])
+        if (data?.boundingbox) {
+          mapRef.current?.fitBounds(data.boundingbox)
+        } else {
+          mapRef.current?.flyTo([data.lat, data.lon], 15)
+        }
+        chatRef.current?.addTonyMessage(`Centered on ${data.label || q}. Draw the border you want Tony to analyze.`)
       } else {
-        setSearchError('Address not found')
+        setSearchError(data?.error || 'Address not found')
         setTimeout(() => setSearchError(''), 3000)
       }
     } catch {
@@ -70,22 +86,97 @@ export default function BuckGridProPage() {
   }, [searchQuery])
 
   return (
-    <div style={{ height: '100dvh', width: '100vw', background: '#000', overflow: 'hidden', position: 'fixed' }}>
+    <div
+      style={{
+        height: '100dvh',
+        width: '100vw',
+        overflow: 'hidden',
+        position: 'fixed',
+        background:
+          'radial-gradient(circle at top left, rgba(166,109,22,0.16), transparent 26%), linear-gradient(180deg, #0c100c 0%, #0a0d09 100%)',
+      }}
+    >
 
       {/* Full-screen map */}
       <MapContainer ref={mapRef} activeTool={activeTool} brushSize={brushSize} />
 
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background:
+            'linear-gradient(90deg, rgba(8,11,8,0.72) 0%, rgba(8,11,8,0.18) 34%, rgba(8,11,8,0.06) 56%, rgba(8,11,8,0.55) 100%)',
+          pointerEvents: 'none',
+        }}
+      />
+
+      <div
+        style={{
+          position: 'absolute',
+          top: 18,
+          left: 18,
+          zIndex: 2000,
+          width: isMobile ? 'calc(100vw - 36px)' : 'min(420px, calc(100vw - 420px))',
+          pointerEvents: 'auto',
+        }}
+      >
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '7px 12px',
+            borderRadius: 999,
+            background: 'rgba(10,12,10,0.72)',
+            border: '1px solid rgba(217,164,65,0.18)',
+            color: '#d9a441',
+            fontSize: 10,
+            fontWeight: 800,
+            letterSpacing: '0.22em',
+            textTransform: 'uppercase',
+            marginBottom: 14,
+            backdropFilter: 'blur(14px)',
+          }}
+        >
+          <span>Elite Habitat Intelligence</span>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#84cc16', boxShadow: '0 0 10px rgba(132,204,22,0.7)' }} />
+        </div>
+        <div style={{ color: '#f8f0de', fontSize: 'clamp(28px, 3vw, 40px)', lineHeight: 0.96, fontWeight: 700, letterSpacing: '-0.05em', marginBottom: 10, fontFamily: "'Playfair Display', serif" }}>
+          BuckGrid Pro
+        </div>
+        <div style={{ color: 'rgba(237,227,197,0.76)', fontSize: 14, lineHeight: 1.6, maxWidth: 420, marginBottom: 12 }}>
+          Sketch the property, lock the footprint, and get a ranked habitat plan without burying the map under UI.
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {['Search the farm', 'Paint the plan', 'Ask Tony the next move'].map((line) => (
+            <div
+              key={line}
+              style={{
+                padding: '7px 11px',
+                borderRadius: 999,
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                color: '#d8decb',
+                fontSize: 11,
+                backdropFilter: 'blur(10px)',
+              }}
+            >
+              {line}
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* ── ADDRESS SEARCH BAR ── */}
       <div style={{
         position: 'absolute',
-        top: 10,
-        left: '50%',
-        transform: 'translateX(-50%)',
+        top: isMobile ? 156 : 22,
+        left: isMobile ? 18 : '50%',
+        transform: isMobile ? 'none' : 'translateX(-50%)',
         zIndex: 2000,
         display: 'flex',
         gap: 0,
-        width: 380,
-        maxWidth: 'calc(100vw - 220px)',
+        width: isMobile ? 'calc(100vw - 36px)' : 'min(460px, calc(100vw - 40px))',
       }}>
         <input
           value={searchQuery}
@@ -94,29 +185,30 @@ export default function BuckGridProPage() {
           placeholder="Search address or property..."
           style={{
             flex: 1,
-            background: 'rgba(15,15,15,0.97)',
-            border: '1px solid rgba(255,107,0,0.35)',
+            background: 'rgba(10,12,10,0.92)',
+            border: '1px solid rgba(217,164,65,0.24)',
             borderRight: 'none',
-            color: '#fff',
-            padding: '10px 14px',
-            borderRadius: '8px 0 0 8px',
-            fontSize: 12,
+            color: '#f7f0de',
+            padding: '14px 16px',
+            borderRadius: '14px 0 0 14px',
+            fontSize: 13,
             outline: 'none',
-            backdropFilter: 'blur(12px)',
+            backdropFilter: 'blur(16px)',
+            boxShadow: '0 18px 40px rgba(0,0,0,0.24)',
           }}
         />
         <button
           onClick={searchAddress}
           disabled={searching}
           style={{
-            background: '#FF6B00',
+            background: 'linear-gradient(135deg, #d9a441 0%, #f6d58e 100%)',
             border: 'none',
-            borderRadius: '0 8px 8px 0',
-            color: '#000',
+            borderRadius: '0 14px 14px 0',
+            color: '#17150f',
             fontWeight: 900,
-            padding: '0 14px',
+            padding: '0 18px',
             cursor: searching ? 'wait' : 'pointer',
-            fontSize: 14,
+            fontSize: 15,
             flexShrink: 0,
           }}
         >
@@ -144,16 +236,25 @@ export default function BuckGridProPage() {
         className="glass"
         style={{
           position: 'absolute',
-          left: 10,
-          top: 10,
-          padding: 12,
-          borderRadius: 12,
-          width: 182,
+          left: 18,
+          top: isMobile ? 214 : 108,
+          padding: 14,
+          borderRadius: 20,
+          width: isMobile ? 'calc(100vw - 36px)' : 214,
           zIndex: 2000,
+          background: 'linear-gradient(180deg, rgba(14,18,14,0.94) 0%, rgba(10,12,10,0.98) 100%)',
+          border: '1px solid rgba(217,164,65,0.16)',
+          boxShadow: '0 24px 60px rgba(0,0,0,0.32)',
         }}
       >
-        <div style={{ fontSize: 11, fontWeight: 900, color: '#FF6B00', letterSpacing: '0.08em', marginBottom: 2 }}>
+        <div style={{ fontSize: 10, fontWeight: 900, color: '#d9a441', letterSpacing: '0.2em', marginBottom: 6, textTransform: 'uppercase' }}>
           BUCKGRID PRO
+        </div>
+        <div style={{ color: '#f7f0de', fontSize: 18, fontWeight: 700, lineHeight: 1.1, marginBottom: 8, fontFamily: "'Playfair Display', serif" }}>
+          Tools
+        </div>
+        <div style={{ color: 'rgba(237,227,197,0.68)', fontSize: 12, lineHeight: 1.55, marginBottom: 6 }}>
+          Draw only what matters, then lock the boundary when you want Tony to react to the plan.
         </div>
         <ToolGrid
           tools={TOOLS}
@@ -173,6 +274,15 @@ export default function BuckGridProPage() {
       <TonyChat
         ref={chatRef}
         getCaptureTarget={() => mapRef.current?.getCaptureElement() ?? null}
+        getSpatialContext={() => ({
+          ...(mapRef.current?.getSpatialContext() ?? {
+            acreage: propertyAcres,
+            boundaryGeoJSON: null,
+            mapBounds: null,
+            layers: [],
+          }),
+          locationLabel: searchLabel,
+        })}
       />
 
       {/* ── ACRES DISPLAY (bottom-left) ── */}
@@ -180,17 +290,25 @@ export default function BuckGridProPage() {
         className="glass"
         style={{
           position: 'absolute',
-          left: 10,
-          bottom: 10,
-          padding: '10px 16px',
-          borderRadius: 10,
-          borderLeft: '4px solid #FF6B00',
+          left: 18,
+          bottom: isMobile ? 18 : 18,
+          padding: '14px 18px',
+          borderRadius: 20,
+          borderLeft: '4px solid #d9a441',
           zIndex: 2000,
+          background: 'linear-gradient(180deg, rgba(14,18,14,0.95) 0%, rgba(10,12,10,0.98) 100%)',
+          border: '1px solid rgba(217,164,65,0.16)',
         }}
       >
-        <div style={{ fontSize: 24, fontWeight: 900, color: '#FF6B00', lineHeight: 1 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, color: 'rgba(237,227,197,0.62)', letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: 6 }}>
+          Locked Footprint
+        </div>
+        <div style={{ fontSize: 30, fontWeight: 900, color: '#d9a441', lineHeight: 1 }}>
           {propertyAcres > 0 ? propertyAcres.toLocaleString() : '—'}
-          <span style={{ fontSize: 9, color: '#555', marginLeft: 5, letterSpacing: '0.1em' }}>ACRES</span>
+          <span style={{ fontSize: 10, color: 'rgba(237,227,197,0.52)', marginLeft: 6, letterSpacing: '0.16em' }}>ACRES</span>
+        </div>
+        <div style={{ color: 'rgba(237,227,197,0.64)', fontSize: 12, marginTop: 4 }}>
+          {propertyAcres > 0 ? 'Ready for a habitat audit.' : 'Draw and lock a boundary to start.'}
         </div>
       </div>
     </div>

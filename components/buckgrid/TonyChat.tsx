@@ -10,19 +10,95 @@ export type TonyChatHandle = {
 
 type Message = { role: 'tony' | 'user'; text: string }
 
-const TonyChat = forwardRef<TonyChatHandle, { getCaptureTarget: () => HTMLElement | null }>(
-  ({ getCaptureTarget }, ref) => {
+type SpatialContext = {
+  acreage: number
+  boundaryGeoJSON: any | null
+  mapBounds: { sw: [number, number]; ne: [number, number] } | null
+  layers: any[]
+  locationLabel?: string
+}
+
+const TonyChat = forwardRef<TonyChatHandle, {
+  getCaptureTarget: () => HTMLElement | null
+  getSpatialContext: () => SpatialContext
+}>(
+  ({ getCaptureTarget, getSpatialContext }, ref) => {
     const [chat, setChat] = useState<Message[]>([
-      { role: 'tony', text: "Ready. Lock the border and let's start the audit." },
+      { role: 'tony', text: "Ready. Lock the border, paint what matters, and I'll turn the property into a hunt plan." },
     ])
     const [input, setInput] = useState('')
     const [isOpen, setIsOpen] = useState(true)
     const [loading, setLoading] = useState(false)
+    const [viewportWidth, setViewportWidth] = useState(1600)
     const scrollRef = useRef<HTMLDivElement>(null)
+    const quickPrompts = [
+      'Best early-season stand?',
+      'Where should the sanctuary go?',
+      'What should I build this week?',
+    ]
 
     useEffect(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }, [chat])
+
+    useEffect(() => {
+      const syncViewport = () => setViewportWidth(window.innerWidth)
+      syncViewport()
+      window.addEventListener('resize', syncViewport)
+      return () => window.removeEventListener('resize', syncViewport)
+    }, [])
+
+    const isMobile = viewportWidth < 960
+
+    const askTony = async (prompt: string) => {
+      const target = getCaptureTarget()
+      const spatial = getSpatialContext()
+      const canvas = target ? await html2canvas(target, { useCORS: true, scale: 1 }) : null
+      const imageBase64 = canvas?.toDataURL('image/png').replace('data:image/png;base64,', '')
+
+      if (spatial.boundaryGeoJSON && spatial.mapBounds) {
+        const res = await fetch('/api/tony', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64,
+            boundaryGeoJSON: spatial.boundaryGeoJSON,
+            mapBounds: spatial.mapBounds,
+            acreage: spatial.acreage,
+            region: spatial.locationLabel || 'Unknown region',
+            state: spatial.locationLabel || 'Unknown state',
+            messages: [{ role: 'user', content: `${prompt}\n\nVisible drawn layers: ${JSON.stringify(spatial.layers)}` }],
+            stream: false,
+          }),
+        })
+        if (res.ok) {
+          return res.json()
+        }
+      }
+
+      const fallbackRes = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: prompt, imageDataUrl: canvas?.toDataURL('image/jpeg', 0.6) }),
+      })
+      return fallbackRes.json()
+    }
+
+    const runPrompt = async (prompt: string) => {
+      if (!prompt.trim() || loading) return
+
+      setLoading(true)
+      setChat(p => [...p, { role: 'user', text: prompt }])
+
+      try {
+        const data = await askTony(prompt)
+        setChat(p => [...p, { role: 'tony', text: data.reply || 'No reply.' }])
+      } catch {
+        setChat(p => [...p, { role: 'tony', text: "I'm up, but the live model path failed. Ask again after locking the property or use one of the quick prompts." }])
+      }
+
+      setLoading(false)
+    }
 
     useImperativeHandle(ref, () => ({
       addTonyMessage: (text: string) => setChat(p => [...p, { role: 'tony', text }]),
@@ -31,16 +107,7 @@ const TonyChat = forwardRef<TonyChatHandle, { getCaptureTarget: () => HTMLElemen
         setLoading(true)
         setChat(p => [...p, { role: 'tony', text: 'Analyzing terrain & cover...' }])
         try {
-          const target = getCaptureTarget()
-          if (!target) throw new Error('No map found')
-          const canvas = await html2canvas(target, { useCORS: true, scale: 1 })
-          const imageDataUrl = canvas.toDataURL('image/jpeg', 0.6)
-          const res = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: contextPrompt, imageDataUrl }),
-          })
-          const data = await res.json()
+          const data = await askTony(contextPrompt)
           setChat(p => {
             const next = [...p]
             next.pop() // remove "Analyzing..."
@@ -48,33 +115,16 @@ const TonyChat = forwardRef<TonyChatHandle, { getCaptureTarget: () => HTMLElemen
             return next
           })
         } catch {
-          setChat(p => [...p, { role: 'tony', text: "I couldn't get a clear visual. Try again." }])
+          setChat(p => [...p, { role: 'tony', text: "The live vision lane missed, but the property is still locked. Ask for one move at a time and I'll give you the best non-visual guidance I can." }])
         }
         setLoading(false)
       },
-    }), [loading, getCaptureTarget])
+    }), [loading, getCaptureTarget, getSpatialContext])
 
     const send = async () => {
-      if (!input.trim() || loading) return
       const msg = input.trim()
-      setLoading(true)
       setInput('')
-      setChat(p => [...p, { role: 'user', text: msg }])
-      try {
-        const target = getCaptureTarget()
-        const canvas = target ? await html2canvas(target, { useCORS: true, scale: 1 }) : null
-        const imageDataUrl = canvas?.toDataURL('image/jpeg', 0.6)
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: msg, imageDataUrl }),
-        })
-        const data = await res.json()
-        setChat(p => [...p, { role: 'tony', text: data.reply || 'No reply.' }])
-      } catch {
-        setChat(p => [...p, { role: 'tony', text: 'Capture failed.' }])
-      }
-      setLoading(false)
+      await runPrompt(msg)
     }
 
     return (
@@ -82,41 +132,56 @@ const TonyChat = forwardRef<TonyChatHandle, { getCaptureTarget: () => HTMLElemen
         className="glass"
         style={{
           position: 'absolute',
-          right: 10,
-          top: 10,
-          width: isOpen ? 310 : 52,
-          borderRadius: 12,
+          right: 12,
+          top: isMobile ? 'auto' : 12,
+          bottom: isMobile ? 12 : 'auto',
+          width: isOpen ? (isMobile ? 'calc(100vw - 24px)' : 'min(320px, calc(100vw - 24px))') : 54,
+          borderRadius: 24,
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          maxHeight: '80vh',
+          maxHeight: 'calc(100vh - 24px)',
           transition: 'width 0.25s ease',
           zIndex: 2000,
+          background: 'linear-gradient(180deg, rgba(18,22,18,0.97) 0%, rgba(10,14,11,0.96) 100%)',
+          border: '1px solid rgba(220,188,117,0.18)',
+          boxShadow: '0 24px 60px rgba(0,0,0,0.38)',
         }}
       >
         {/* Header */}
         <div
           onClick={() => setIsOpen(!isOpen)}
           style={{
-            padding: '11px 14px',
-            background: '#1a1a1a',
+            padding: '16px 18px 14px',
+            background: 'linear-gradient(180deg, rgba(30,36,28,0.96) 0%, rgba(15,18,15,0.96) 100%)',
             cursor: 'pointer',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             fontWeight: 900,
             fontSize: 10,
-            color: '#FF6B00',
-            letterSpacing: '0.12em',
+            color: '#d9a441',
+            letterSpacing: '0.18em',
             flexShrink: 0,
+            textTransform: 'uppercase',
+            borderBottom: '1px solid rgba(255,255,255,0.06)',
           }}
         >
-          <span>{isOpen ? 'TONY PARTNER' : '🦌'}</span>
-          {isOpen && <span style={{ color: '#555' }}>—</span>}
+          <span>{isOpen ? 'Tony Habitat Partner' : '🦌'}</span>
+          {isOpen && <span style={{ color: 'rgba(237,227,197,0.4)' }}>collapse</span>}
         </div>
 
         {isOpen && (
           <>
+            <div style={{ padding: '14px 16px 12px', background: 'rgba(217,164,65,0.06)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <div style={{ color: '#f7f0de', fontSize: 17, fontWeight: 700, lineHeight: 1.15, marginBottom: 6 }}>
+                Premium deer-ground intelligence.
+              </div>
+              <div style={{ color: 'rgba(237,227,197,0.72)', fontSize: 12, lineHeight: 1.55 }}>
+                Ask Tony for the next best move, best stand, sanctuary location, or build order after you sketch the property.
+              </div>
+            </div>
+
             {/* Messages */}
             <div
               ref={scrollRef}
@@ -125,10 +190,11 @@ const TonyChat = forwardRef<TonyChatHandle, { getCaptureTarget: () => HTMLElemen
                 flex: 1,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 8,
-                padding: 10,
-                minHeight: 120,
-                maxHeight: 380,
+                gap: 10,
+                padding: 14,
+                minHeight: 160,
+                maxHeight: 420,
+                background: 'radial-gradient(circle at top, rgba(217,164,65,0.08), transparent 45%)',
               }}
             >
               {chat.map((m, i) => (
@@ -136,47 +202,71 @@ const TonyChat = forwardRef<TonyChatHandle, { getCaptureTarget: () => HTMLElemen
                   key={i}
                   style={{
                     alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                    background: m.role === 'user' ? '#FF6B00' : '#2a2a2a',
-                    color: '#fff',
-                    padding: '8px 12px',
-                    borderRadius: 10,
+                    background: m.role === 'user'
+                      ? 'linear-gradient(135deg, #d9a441 0%, #f2cd7a 100%)'
+                      : 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(18,22,18,0.92) 100%)',
+                    color: m.role === 'user' ? '#17150f' : '#f7f0de',
+                    padding: '10px 13px',
+                    borderRadius: 16,
                     fontSize: 12,
-                    maxWidth: '88%',
-                    lineHeight: 1.5,
+                    maxWidth: '90%',
+                    lineHeight: 1.65,
+                    border: m.role === 'user' ? 'none' : '1px solid rgba(255,255,255,0.06)',
                   }}
                 >
                   {m.text}
                 </div>
               ))}
               {loading && (
-                <div style={{ alignSelf: 'flex-start', color: '#555', fontSize: 10, paddingLeft: 4 }}>
-                  Tony is looking...
+                <div style={{ alignSelf: 'flex-start', color: 'rgba(237,227,197,0.54)', fontSize: 10, paddingLeft: 4, letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+                  Tony is reading the property...
                 </div>
               )}
+            </div>
+
+            <div style={{ padding: '0 14px 12px', display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {quickPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  onClick={() => runPrompt(prompt)}
+                  style={{
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.07)',
+                    color: '#d9ddcf',
+                    borderRadius: 999,
+                    padding: '7px 10px',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {prompt}
+                </button>
+              ))}
             </div>
 
             {/* Input */}
             <div
               style={{
-                padding: '8px 10px',
+                padding: '10px 12px 12px',
                 display: 'flex',
-                gap: 6,
-                background: '#111',
+                gap: 8,
+                background: 'rgba(12,15,12,0.98)',
                 flexShrink: 0,
+                borderTop: '1px solid rgba(255,255,255,0.05)',
               }}
             >
               <input
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && send()}
-                placeholder="Ask Tony..."
+                placeholder="Ask Tony where to hunt, build, or improve..."
                 style={{
                   flex: 1,
-                  background: '#222',
-                  border: '1px solid #333',
-                  color: '#fff',
-                  padding: '7px 10px',
-                  borderRadius: 6,
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  color: '#fff8e9',
+                  padding: '11px 13px',
+                  borderRadius: 14,
                   fontSize: 12,
                   outline: 'none',
                 }}
@@ -185,14 +275,15 @@ const TonyChat = forwardRef<TonyChatHandle, { getCaptureTarget: () => HTMLElemen
                 onClick={send}
                 disabled={loading}
                 style={{
-                  background: '#FF6B00',
+                  background: 'linear-gradient(135deg, #d9a441 0%, #f2cd7a 100%)',
                   border: 'none',
-                  borderRadius: 6,
+                  borderRadius: 14,
                   cursor: loading ? 'wait' : 'pointer',
-                  color: '#000',
+                  color: '#17150f',
                   fontWeight: 'bold',
-                  padding: '0 12px',
+                  padding: '0 14px',
                   fontSize: 13,
+                  boxShadow: '0 12px 28px rgba(217,164,65,0.24)',
                 }}
               >
                 ➤

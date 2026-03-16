@@ -4,6 +4,10 @@ const nextConfig = {
   images: {
     domains: [],
   },
+  experimental: {
+    webpackBuildWorker: false,
+    workerThreads: true,
+  },
 }
 
 module.exports = nextConfig

@@ -39,7 +39,7 @@ export default function TonyConsultant() {
   const mapContainerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
   const drawRef = useRef<any>(null)
-  const leafletRef = useRef<any>(null)
+  const mapboxglRef = useRef<any>(null)
 
   const [mapLoaded, setMapLoaded] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -55,106 +55,108 @@ export default function TonyConsultant() {
 
   const region = REGION_MAP[state] ?? "Midwest"
 
-  // ── Initialize Leaflet + Draw ────────────────────────────────
+  // ── Initialize Mapbox + Draw ────────────────────────────────
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return
 
     // Dynamic imports to avoid SSR issues
     Promise.all([
-      import("leaflet"),
-      import("leaflet-draw"),
+      import("mapbox-gl"),
+      import("@mapbox/mapbox-gl-draw"),
       import("@turf/area"),
-    ]).then(([leafletModule, leafletDrawModule, turfModule]) => {
-      const L = leafletModule.default
+    ]).then(([mapboxModule, MapboxDrawModule, turfModule]) => {
+      const mapboxgl = mapboxModule.default
+      const MapboxDraw = MapboxDrawModule.default
       const turfArea = turfModule.default
-      leafletRef.current = L
+      mapboxglRef.current = mapboxgl
 
-      const map = L.map(mapContainerRef.current!, { preferCanvas: false }).setView([41.8, -93.5], 14)
+      mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!
 
-      const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN
-      if (mapboxToken) {
-        L.tileLayer(
-          `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/{z}/{x}/{y}@2x?access_token=${mapboxToken}`,
-          {
-            attribution: '© <a href="https://www.mapbox.com/">Mapbox</a>',
-            tileSize: 512,
-            zoomOffset: -1,
-            maxZoom: 22,
-            crossOrigin: 'anonymous',
-          }
-        ).addTo(map)
-      } else {
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-          maxZoom: 19,
-        }).addTo(map)
-      }
-
-      // Feature group for drawn items
-      const drawnItems = new L.FeatureGroup()
-      map.addLayer(drawnItems)
-
-      // Drawing control
-      const drawControl = new L.Control.Draw({
-        position: 'topleft',
-        draw: {
-          polygon: {
-            shapeOptions: {
-              color: '#c8860a',
-              weight: 2,
-              opacity: 0.9,
-              fillOpacity: 0.08
-            }
-          },
-          polyline: false,
-          circle: false,
-          rectangle: false,
-          marker: false,
-          circlemarker: false
-        },
-        edit: {
-          featureGroup: drawnItems,
-          edit: {},
-          remove: true
-        }
+      const map = new mapboxgl.Map({
+        container: mapContainerRef.current!,
+        style: "mapbox://styles/mapbox/satellite-streets-v12",
+        center: [-93.5, 41.8],
+        zoom: 14,
+        preserveDrawingBuffer: true, // Required for canvas capture
       })
-      map.addControl(drawControl)
 
-      // Navigation and scale controls
-      L.control.scale({ imperial: true, metric: false }).addTo(map)
-      L.control.zoom({ position: 'topright' }).addTo(map)
+      const draw = new MapboxDraw({
+        displayControlsDefault: false,
+        controls: { polygon: true, trash: true },
+        styles: [
+          {
+            id: "gl-draw-polygon-fill-inactive",
+            type: "fill",
+            filter: ["all", ["==", "active", "false"], ["==", "$type", "Polygon"]],
+            paint: { "fill-color": "#c8860a", "fill-opacity": 0.08 },
+          },
+          {
+            id: "gl-draw-polygon-fill-active",
+            type: "fill",
+            filter: ["all", ["==", "active", "true"], ["==", "$type", "Polygon"]],
+            paint: { "fill-color": "#c8860a", "fill-opacity": 0.12 },
+          },
+          {
+            id: "gl-draw-polygon-stroke-inactive",
+            type: "line",
+            filter: ["all", ["==", "active", "false"], ["==", "$type", "Polygon"]],
+            paint: { "line-color": "#c8860a", "line-width": 2, "line-dasharray": [2, 2] },
+          },
+          {
+            id: "gl-draw-polygon-stroke-active",
+            type: "line",
+            filter: ["all", ["==", "active", "true"], ["==", "$type", "Polygon"]],
+            paint: { "line-color": "#c8860a", "line-width": 2.5 },
+          },
+          {
+            id: "gl-draw-polygon-midpoint",
+            type: "circle",
+            filter: ["all", ["==", "$type", "Point"], ["==", "meta", "midpoint"]],
+            paint: { "circle-radius": 4, "circle-color": "#c8860a" },
+          },
+          {
+            id: "gl-draw-polygon-and-line-vertex-inactive",
+            type: "circle",
+            filter: ["all", ["==", "meta", "vertex"], ["==", "$type", "Point"]],
+            paint: { "circle-radius": 5, "circle-color": "#c8860a", "circle-stroke-width": 2, "circle-stroke-color": "#fff" },
+          },
+        ],
+      })
 
-      const updateBoundary = (layer: any) => {
-        const geojson = layer.toGeoJSON()
-        setPropertyBoundary(geojson.geometry)
-        const areaM2 = turfArea(geojson)
+      map.addControl(draw, "top-left")
+      map.addControl(new mapboxgl.NavigationControl(), "top-right")
+      map.addControl(new mapboxgl.ScaleControl({ unit: "imperial" }), "bottom-right")
+
+      const updateBoundary = (feature: any) => {
+        setPropertyBoundary(feature.geometry)
+        const areaM2 = turfArea(feature)
         const acres = Math.round(areaM2 * 0.000247105)
         setAcreage(acres)
       }
 
-      map.on(L.Draw.Event.CREATED, (e: any) => {
-        const layer = e.layer
-        drawnItems.addLayer(layer)
-        updateBoundary(layer)
+      map.on("draw.create", (e: any) => {
+        const feature = e.features[0]
+        updateBoundary(feature)
       })
-
-      map.on(L.Draw.Event.EDITED, (e: any) => {
-        const layers = e.layers
-        layers.eachLayer((layer: any) => {
-          updateBoundary(layer)
-        })
+      map.on("draw.update", (e: any) => {
+        const feature = e.features[0]
+        updateBoundary(feature)
       })
-
-      map.on(L.Draw.Event.DELETED, () => {
+      map.on("draw.delete", () => {
         setPropertyBoundary(null)
         setAcreage(0)
       })
 
-      map.on('load', () => setMapLoaded(true))
-      map.fire('load') // Manually trigger load for Leaflet
+      map.on("load", () => setMapLoaded(true))
+
+      map.on("error", (e) => {
+        if (e.error && e.error.message.includes("Invalid access token")) {
+          setError("Mapbox API token is missing or invalid. Please set NEXT_PUBLIC_MAPBOX_TOKEN in your environment.")
+        }
+      })
 
       mapRef.current = map
-      drawRef.current = drawnItems
+      drawRef.current = draw
     })
 
     return () => {
@@ -261,15 +263,27 @@ export default function TonyConsultant() {
   )
 
   const addFeatureToMap = (feature: TonyFeature, map: any) => {
-    const L = leafletRef.current
-    if (!L) return
-
+    const sourceId = `tony-${feature.id}`
     const layerId = `tony-layer-${feature.id}`
 
     // Clean up any previous version
-    if (map.hasLayer(layerId)) {
-      map.removeLayer(layerId)
-    }
+    ;[`${layerId}-label`, `${layerId}-stroke`, layerId].forEach((id) => {
+      if (map.getLayer(id)) map.removeLayer(id)
+    })
+    if (map.getSource(sourceId)) map.removeSource(sourceId)
+
+    map.addSource(sourceId, {
+      type: "geojson",
+      data: {
+        type: "Feature",
+        properties: {
+          label: feature.label,
+          type: feature.type,
+          reason: feature.reason,
+        },
+        geometry: feature.geometry,
+      },
+    })
 
     const style = feature.style ?? FEATURE_STYLES[feature.type as FeatureType] ?? {
       color: "#ffffff",
@@ -277,94 +291,92 @@ export default function TonyConsultant() {
       weight: 2,
     }
 
-    let layer: any
-
     if (feature.geometry.type === "Polygon") {
-      layer = L.geoJSON(feature.geometry as any, {
-        style: {
-          color: style.color,
-          weight: style.weight,
-          fillOpacity: style.fillOpacity,
-        }
+      map.addLayer({
+        id: layerId,
+        type: "fill",
+        source: sourceId,
+        paint: { "fill-color": style.color, "fill-opacity": style.fillOpacity },
+      })
+      map.addLayer({
+        id: `${layerId}-stroke`,
+        type: "line",
+        source: sourceId,
+        paint: { "line-color": style.color, "line-width": style.weight, "line-opacity": 0.9 },
       })
     } else if (feature.geometry.type === "LineString") {
-      const dashPatterns: Record<string, string> = {
-        sneak_trail:   '10, 5',    // long dashes — stealthy approach
-        access_trail:  '6, 4',     // medium dashes — food plot route
-        shooting_lane: '14, 8',    // sparse — open lane
-        trail:         '4, 2',     // short dashes — generic trail
-      }
-      const dashArray = dashPatterns[feature.type] ?? '4, 2'
-      layer = L.geoJSON(feature.geometry as any, {
-        style: {
-          color: style.color,
-          weight: feature.type === 'sneak_trail' ? 3 : style.weight,
-          dashArray,
-          opacity: 0.9
-        }
+      map.addLayer({
+        id: layerId,
+        type: "line",
+        source: sourceId,
+        paint: {
+          "line-color": style.color,
+          "line-width": style.weight,
+          "line-dasharray": [3, 1.5],
+          "line-opacity": 0.85,
+        },
       })
     } else if (feature.geometry.type === "Point") {
-      layer = L.geoJSON(feature.geometry as any, {
-        pointToLayer: (_geoJsonPoint: any, latlng: L.LatLng) => {
-          return L.circleMarker(latlng, {
-            radius: 9,
-            color: style.color,
-            weight: 2,
-            fillOpacity: 0.95,
-            stroke: true,
-            fillColor: style.color
-          })
-        }
+      map.addLayer({
+        id: layerId,
+        type: "circle",
+        source: sourceId,
+        paint: {
+          "circle-radius": 9,
+          "circle-color": style.color,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#ffffff",
+          "circle-opacity": 0.95,
+        },
       })
     }
 
-    if (layer) {
-      layer.addTo(map)
-      layer._leaflet_id = layerId
+    // Label layer
+    map.addLayer({
+      id: `${layerId}-label`,
+      type: "symbol",
+      source: sourceId,
+      layout: {
+        "text-field": feature.label,
+        "text-size": 11,
+        "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
+        "text-offset": [0, feature.geometry.type === "Point" ? 1.4 : 0.8],
+        "text-anchor": "top",
+        "text-allow-overlap": false,
+      },
+      paint: {
+        "text-color": "#ffffff",
+        "text-halo-color": "#000000",
+        "text-halo-width": 1.5,
+      },
+    })
 
-      // Add label (simplified, Leaflet doesn't have direct text layers like Mapbox)
-      if (feature.geometry.type === "Point") {
-        const coords = feature.geometry.coordinates as [number, number]
-        L.marker([coords[1], coords[0]], {
-          icon: L.divIcon({
-            className: 'tony-label',
-            html: `<div style="color: #fff; text-shadow: 0 0 2px #000; font-size: 11px; white-space: nowrap;">${feature.label}</div>`,
-            iconAnchor: [0, -10]
-          })
-        }).addTo(map)
-      } else {
-        const bounds = layer.getBounds()
-        if (bounds.isValid()) {
-          const center = bounds.getCenter()
-          L.marker(center, {
-            icon: L.divIcon({
-              className: 'tony-label',
-              html: `<div style="color: #fff; text-shadow: 0 0 2px #000; font-size: 11px; white-space: nowrap;">${feature.label}</div>`,
-              iconAnchor: [0, 0]
-            })
-          }).addTo(map)
-        }
-      }
+    // Popup on click
+    const mapboxgl = mapboxglRef.current
+    if (!mapboxgl) return
 
-      // Popup on click
-      layer.bindPopup(`
-        <div style="font-family:'DM Sans',sans-serif;padding:4px 2px">
-          <div style="color:#c8860a;font-weight:700;font-size:13px;margin-bottom:6px">
-            ${feature.label}
+    map.on("click", layerId, (e: any) => {
+      new mapboxgl.Popup({ className: "tony-popup", maxWidth: "260px" })
+        .setLngLat(e.lngLat)
+        .setHTML(`
+          <div style="font-family:'DM Sans',sans-serif;padding:4px 2px">
+            <div style="color:#c8860a;font-weight:700;font-size:13px;margin-bottom:6px">
+              ${feature.label}
+            </div>
+            <div style="font-size:12px;color:#444;line-height:1.5">
+              ${feature.reason}
+            </div>
           </div>
-          <div style="font-size:12px;color:#444;line-height:1.5">
-            ${feature.reason}
-          </div>
-        </div>
-      `)
+        `)
+        .addTo(map)
+    })
 
-      layer.on('mouseover', () => {
-        map.getContainer().style.cursor = 'pointer'
-      })
-      layer.on('mouseout', () => {
-        map.getContainer().style.cursor = ''
-      })
-    }
+    map.on("mouseenter", layerId, () => {
+      map.getCanvas().style.cursor = "pointer"
+    })
+    map.on("mouseleave", layerId, () => {
+      map.getCanvas().style.cursor = ""
+    })
   }
 
   // ── Clear Tony drawings ─────────────────────────────────────
@@ -374,9 +386,10 @@ export default function TonyConsultant() {
 
     drawnFeatures.forEach((f) => {
       const layerId = `tony-layer-${f.id}`
-      if (map.hasLayer(layerId)) {
-        map.removeLayer(layerId)
-      }
+      ;[`${layerId}-label`, `${layerId}-stroke`, layerId].forEach((id) => {
+        if (map.getLayer(id)) map.removeLayer(id)
+      })
+      if (map.getSource(`tony-${f.id}`)) map.removeSource(`tony-${f.id}`)
     })
 
     setDrawnFeatures([])
