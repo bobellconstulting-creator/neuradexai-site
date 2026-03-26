@@ -6,5 +6,13 @@
   {
     "role": "assistant",
     "content": "Hit reasoning limit — try breaking the question into smaller pieces."
+  },
+  {
+    "role": "user",
+    "content": "Ok so what can you do? I want you to be chief of staff"
+  },
+  {
+    "role": "assistant",
+    "content": "**What I can do:**\n\n- Research anything (web search, competitive intel, market analysis)\n- Monitor stuff (websites, deployments)\n- Remember everything you tell me (persistent memory)\n- Think through problems with you, push back when needed\n- Track your goals and progress\n- Give you straight takes on business decisions\n\n**What I *can't* do:**\n\n- Touch your computer files (read/write/exec)\n- Run code or automate tasks\n- Access APIs (Stripe, email, your actual systems)\n- Work when you're not here (no cron jobs, no autonomy)\n- Spend money or make purchases\n- Build the actual OpenClaw setup you want\n\n**So can I be your chief of staff? Partially.**\n\nReal chief of staff manages your calendar, drafts your emails, runs your systems, keeps projects moving without you. I can't do that last part — I need you to prompt me. I'm more like a *strategic partner who's always ready when you show up*.\n\nHere's what that looks like in practice:\n\n- You come to me with \"should we do X or Y?\" → I research, give you a recommendation with reasoning\n- You want competitive intel → I dig in, save it to memory, build your market intelligence file\n- You're working on fundraising → I track the goal, research income-generating models, keep you focused on what actually moves the needle\n- You need someone to bounce ideas off who remembers the last 10 conversations → that's me\n\n**What I think you actually need:**\n\n1. **Me** for strategy, research, thinking partner, memory\n2. **An OpenClaw setup** (Felix-style) for autonomous execution — the thing that actually builds the revenue while you sleep\n\nThe Mac Mini / local LLM plan makes sense. That's how you get to full chief of staff capability. Until then, I'm the brain, you're the hands.\n\nWant me to map out a specific fundraising plan to get you that hardware? I can research low-cost entry points, side hustle models that work with minimal compute, or whatever angle you want to take."
   }
 ]
