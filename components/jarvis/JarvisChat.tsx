@@ -162,7 +162,8 @@ export default function JarvisChat({
     w.lang = 'en-US'
     w.onresult = (e: SpeechRecognitionEvent) => {
       const transcript = Array.from(e.results)
-        .map(r => r[0].transcript.toLowerCase()).join(' ')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((r: any) => r[0].transcript.toLowerCase()).join(' ')
       if (transcript.includes('jarvis') && !listening) {
         startListening()
       }
