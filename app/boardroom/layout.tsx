@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Boardroom v1.0 | Neuradex AI',
-  description: 'Interactive AI Boardroom — Command your agent fleet.',
+  title: 'Jarvis / Axon Boardroom',
+  description: 'Interactive command boardroom for Jarvis, Axon, and live operator handoff.',
 }
 
 export default function BoardroomLayout({ children }: { children: React.ReactNode }) {

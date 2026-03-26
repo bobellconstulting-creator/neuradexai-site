@@ -28,8 +28,8 @@ export default function HUDOverlay({ agents, selectedAgent }: HUDOverlayProps) {
             N
           </div>
           <div>
-            <div className="text-[#00F2FF] text-xs tracking-[0.25em] font-bold">NEURADEX AI</div>
-            <div className="text-[#94a3b8] text-[10px] tracking-[0.2em]">BOARDROOM v1.0</div>
+            <div className="text-[#00F2FF] text-xs tracking-[0.25em] font-bold">JARVIS / AXON</div>
+            <div className="text-[#94a3b8] text-[10px] tracking-[0.2em]">COMMAND HUD v1.0</div>
           </div>
         </div>
         <div className="text-[#22C55E] text-[10px] tracking-[0.15em] mt-2">

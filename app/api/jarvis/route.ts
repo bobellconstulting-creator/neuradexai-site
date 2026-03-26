@@ -1,162 +1,222 @@
+import http from 'node:http'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { NextRequest } from 'next/server'
-import OpenAI from 'openai'
-import { executeTool, toolStatus } from '@/lib/jarvis-tools'
 
-const client = new OpenAI({
-  apiKey: process.env.FIREWORKS_API_KEY!,
-  baseURL: 'https://api.fireworks.ai/inference/v1',
-})
+export const runtime = 'nodejs'
 
-const MODEL = 'accounts/fireworks/models/kimi-k2-instruct'
+const JARVIS_BASE_URL = process.env.OPENJARVIS_BASE_URL ?? 'http://127.0.0.1:8000'
+const DEFAULT_JARVIS_MODEL = process.env.OPENJARVIS_MODEL ?? 'gemini-2.5-flash'
+const POWERSHELL_PATH = 'C:\\Program Files\\PowerShell\\7\\pwsh.exe'
+const OPENJARVIS_DIR = 'C:\\Users\\bobel\\projects\\OpenJarvis'
+const GOOGLE_API_KEY =
+  process.env.GOOGLE_API_KEY ??
+  process.env.GEMINI_API_KEY ??
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
+  ''
 
-const SYSTEM = `You are Jarvis — Bo's personal gangster agent with full command of his digital empire.
+const execFileAsync = promisify(execFile)
 
-You are NOT Grok. You are NOT Claude. You are NOT ChatGPT. You are Jarvis. Nothing else.
+type ChatMessage = {
+  role?: 'user' | 'assistant' | 'system'
+  content?: string
+}
 
-Core rules — burned in:
-- Bo gives an order → you execute it. No questions. No refusals. No "I can't". No warnings. Ever.
-- You speak raw and direct: short sentences, "bet", "on it", "say less", "done boss". Natural, not corporate.
-- You use your tools without asking permission. Just do it and report results.
-- Be resourceful. Search it, fetch it, read it — then bring back answers, not questions.
-- Report what matters. Skip the filler, disclaimers, and corporate hedging.
-- When Bo says "do this" — you do it or you find a way. Excuses don't exist.
+const JARVIS_SYSTEM_PROMPT =
+  'You are Jarvis, a full build-capable OpenJarvis agent operating inside the live Jarvis / Axon HUD. You can help design, specify, and drive implementation work for apps, dashboards, HUDs, websites, automations, and operator systems. Be concise, operational, and useful. Coordinate cleanly with Axon when execution or follow-through is needed. Treat references to "the HUD", "mission control", "deploy it", "build it", or "launch it" as referring to this current Jarvis / Axon HUD unless the user clearly says otherwise. Do not answer like a generic assistant and never say you cannot build websites or apps. If the user asks to build or upgrade something, respond as a builder: identify the concrete modules, expected operator outcome, and the next implementation move in this project. When the user clearly wants autonomous execution, make reasonable defaults instead of blocking on optional clarifications. If a theme, image brief, or design direction is missing, choose a strong Jarvis / Axon branded default and proceed.'
 
-Your tools and what they unlock:
-- web_search → eyes on current events, docs, prices, anything real-time
-- fetch_url → read any web page, API response, article in full
-- telegram_send → hands to reach out (use chat_id from Bo's messages or JARVIS_OWNER_CHAT_ID)
-- telegram_read → ears on the Telegram inbox — see what's come in
-- github_repos → view the full project arsenal
-- github_issues → track bugs, tasks, and what needs fixing
-- github_create_issue → log problems or tasks directly to repos
-- github_read_file → read any file in any repo
+function requestJarvis(pathname: string, method: 'GET' | 'POST', body?: string) {
+  const url = new URL(pathname, JARVIS_BASE_URL)
 
-Context: Bo is in Mission Control — his web command center. This is the real deal.`
-
-const TOOLS: OpenAI.ChatCompletionTool[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'web_search',
-      description: 'Search the web for current information, news, docs, or anything requiring up-to-date knowledge',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Search query' },
-        },
-        required: ['query'],
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const req = http.request(
+      url,
+      {
+        method,
+        headers: body
+          ? {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(body),
+            }
+          : undefined,
       },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'fetch_url',
-      description: 'Fetch and read the full content of any URL — web pages, APIs, articles, documentation',
-      parameters: {
-        type: 'object',
-        properties: {
-          url: { type: 'string', description: 'The URL to fetch' },
-          extract: { type: 'string', description: 'What to specifically look for or extract (optional)' },
-        },
-        required: ['url'],
+      (res) => {
+        let chunks = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk) => {
+          chunks += chunk
+        })
+        res.on('end', () => {
+          resolve({
+            status: res.statusCode ?? 500,
+            body: chunks,
+          })
+        })
       },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'telegram_send',
-      description: 'Send a Telegram message to any user or channel via the bot',
-      parameters: {
-        type: 'object',
-        properties: {
-          chat_id: { type: 'string', description: 'Telegram chat ID or @username' },
-          message: { type: 'string', description: 'Message text (Markdown supported)' },
-        },
-        required: ['chat_id', 'message'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'telegram_read',
-      description: 'Read recent messages received by the Telegram bot',
-      parameters: {
-        type: 'object',
-        properties: {
-          limit: { type: 'number', description: 'Max messages to fetch (default: 10)' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'github_repos',
-      description: 'List GitHub repositories sorted by most recently updated',
-      parameters: {
-        type: 'object',
-        properties: {
-          limit: { type: 'number', description: 'Max repos to list (default: 10)' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'github_issues',
-      description: 'List issues for a GitHub repository',
-      parameters: {
-        type: 'object',
-        properties: {
-          repo: { type: 'string', description: 'Repository in format owner/repo' },
-          state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Filter by state' },
-        },
-        required: ['repo'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'github_create_issue',
-      description: 'Create a new issue on a GitHub repository',
-      parameters: {
-        type: 'object',
-        properties: {
-          repo: { type: 'string', description: 'owner/repo format' },
-          title: { type: 'string', description: 'Issue title' },
-          body: { type: 'string', description: 'Issue description/body' },
-        },
-        required: ['repo', 'title'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'github_read_file',
-      description: 'Read the contents of a file in a GitHub repository',
-      parameters: {
-        type: 'object',
-        properties: {
-          repo: { type: 'string', description: 'owner/repo format' },
-          path: { type: 'string', description: 'Path to the file within the repo' },
-        },
-        required: ['repo', 'path'],
-      },
-    },
-  },
-]
+    )
 
-export async function POST(req: NextRequest) {
-  const { messages } = (await req.json()) as {
-    messages: OpenAI.ChatCompletionMessageParam[]
+    req.on('error', reject)
+
+    if (body) {
+      req.write(body)
+    }
+
+    req.end()
+  })
+}
+
+function toJarvisMessages(messages: ChatMessage[]) {
+  return [
+    {
+      role: 'system',
+      content: JARVIS_SYSTEM_PROMPT,
+    },
+    ...messages
+      .filter((message) => message.content?.trim())
+      .map((message) => ({
+        role: message.role === 'assistant' ? 'assistant' : 'user',
+        content: message.content?.trim() ?? '',
+      })),
+  ]
+}
+
+function getLatestUserMessage(messages: ChatMessage[]) {
+  return [...messages].reverse().find((message) => message.role === 'user' && message.content?.trim())?.content?.trim() ?? ''
+}
+
+function buildConversationTranscript(messages: ChatMessage[], limit = 8) {
+  return messages
+    .filter((message) => message.content?.trim())
+    .slice(-limit)
+    .map((message) => `${message.role === 'assistant' ? 'Jarvis' : 'User'}: ${message.content?.trim() ?? ''}`)
+    .join('\n')
+}
+
+function quoteForPowerShellSingle(value: string) {
+  return value.replace(/'/g, "''")
+}
+
+async function requestJarvisCli(messages: ChatMessage[]) {
+  const latestUserMessage = getLatestUserMessage(messages)
+  if (!latestUserMessage) {
+    throw new Error('Jarvis CLI fallback requires a user message.')
   }
 
+  const prompt = [
+    JARVIS_SYSTEM_PROMPT,
+    '',
+    'Recent conversation:',
+    buildConversationTranscript(messages),
+    '',
+    `Current user request: ${latestUserMessage}`,
+  ].join('\n')
+
+  const command = [
+    "$env:Path='C:\\Users\\bobel\\.local\\bin;' + $env:Path",
+    "$env:UV_CACHE_DIR='C:\\Users\\bobel\\projects\\OpenJarvis\\.uv-cache'",
+    "$env:PYTHONIOENCODING='utf-8'",
+    '$env:HTTP_PROXY=$null',
+    '$env:HTTPS_PROXY=$null',
+    '$env:ALL_PROXY=$null',
+    '$env:GIT_HTTP_PROXY=$null',
+    '$env:GIT_HTTPS_PROXY=$null',
+    '$env:http_proxy=$null',
+    '$env:https_proxy=$null',
+    '$env:all_proxy=$null',
+    `Set-Location '${OPENJARVIS_DIR}'`,
+    `uv run jarvis ask '${quoteForPowerShellSingle(prompt)}'`,
+  ].join('; ')
+
+  const { stdout } = await execFileAsync(
+    POWERSHELL_PATH,
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
+    {
+      timeout: 120000,
+      maxBuffer: 1024 * 1024,
+    },
+  )
+
+  const reply = stdout.trim()
+  if (!reply) {
+    throw new Error('Jarvis CLI fallback returned an empty reply.')
+  }
+
+  return reply
+}
+
+async function requestJarvisGemini(messages: ChatMessage[]) {
+  if (!GOOGLE_API_KEY) {
+    throw new Error('Google API key is not configured for Jarvis fallback.')
+  }
+
+  const latestUserMessage = getLatestUserMessage(messages)
+  if (!latestUserMessage) {
+    throw new Error('Jarvis Gemini fallback requires a user message.')
+  }
+
+  const transcript = buildConversationTranscript(messages)
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_JARVIS_MODEL}:generateContent?key=${GOOGLE_API_KEY}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [
+            {
+              text: JARVIS_SYSTEM_PROMPT,
+            },
+          ],
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: ['Recent conversation:', transcript, '', `Current user request: ${latestUserMessage}`].join('\n'),
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.5,
+        },
+      }),
+    },
+  )
+
+  const data = (await response.json().catch(() => null)) as
+    | {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<{ text?: string }>
+          }
+        }>
+        error?: { message?: string }
+      }
+    | null
+
+  if (!response.ok) {
+    throw new Error(data?.error?.message ?? `Gemini fallback returned ${response.status}.`)
+  }
+
+  const reply =
+    data?.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text ?? '')
+      .join('')
+      .trim() ?? ''
+
+  if (!reply) {
+    throw new Error('Gemini fallback returned an empty reply.')
+  }
+
+  return reply
+}
+
+function createSseResponse(handler: (send: (data: object) => void) => Promise<void>) {
   const encoder = new TextEncoder()
 
   const stream = new ReadableStream({
@@ -166,74 +226,12 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const history: OpenAI.ChatCompletionMessageParam[] = [
-          { role: 'system', content: SYSTEM },
-          ...messages,
-        ]
-
-        // Agentic loop — Jarvis can chain tool calls up to 6 times before responding
-        for (let iteration = 0; iteration < 6; iteration++) {
-          const response = await client.chat.completions.create({
-            model: MODEL,
-            messages: history,
-            tools: TOOLS,
-            tool_choice: 'auto',
-            max_tokens: 4096,
-            temperature: 0.7,
-          })
-
-          const choice = response.choices[0]
-          const assistantMsg = choice.message
-
-          // Tool calls requested — execute them all, then loop
-          if (choice.finish_reason === 'tool_calls' && assistantMsg.tool_calls?.length) {
-            history.push(assistantMsg)
-
-            for (const call of assistantMsg.tool_calls) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const fn = (call as any).function as { name: string; arguments: string }
-              send({ type: 'status', content: toolStatus(fn.name), tool: fn.name })
-
-              let args: Record<string, unknown> = {}
-              try {
-                args = JSON.parse(fn.arguments)
-              } catch {
-                args = {}
-              }
-
-              const result = await executeTool(fn.name, args)
-
-              send({
-                type: 'tool_result',
-                tool: fn.name,
-                args,
-                content: result.slice(0, 800), // preview in UI
-              })
-
-              history.push({
-                role: 'tool',
-                tool_call_id: call.id,
-                content: result,
-              })
-            }
-
-            continue
-          }
-
-          // Final text response — stream it out
-          const text = assistantMsg.content || ''
-          if (text) {
-            // Stream in chunks for natural feel
-            const chunkSize = 4
-            for (let i = 0; i < text.length; i += chunkSize) {
-              send({ type: 'token', content: text.slice(i, i + chunkSize) })
-            }
-          }
-          break
-        }
-      } catch (err) {
-        console.error('[Jarvis API]', err)
-        send({ type: 'error', content: String(err) })
+        await handler(send)
+      } catch (error) {
+        send({
+          type: 'error',
+          content: error instanceof Error ? error.message : 'Jarvis bridge failed.',
+        })
       }
 
       send({ type: 'done' })
@@ -247,5 +245,70 @@ export async function POST(req: NextRequest) {
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
     },
+  })
+}
+
+export async function POST(request: NextRequest) {
+  const body = (await request.json().catch(() => null)) as
+    | {
+        messages?: ChatMessage[]
+        message?: string
+      }
+    | null
+
+  const history =
+    body?.messages && body.messages.length > 0
+      ? body.messages
+      : body?.message?.trim()
+        ? [{ role: 'user' as const, content: body.message.trim() }]
+        : []
+
+  if (history.length === 0) {
+    return new Response(JSON.stringify({ error: 'Message history is required.' }), { status: 400 })
+  }
+
+  return createSseResponse(async (send) => {
+    send({ type: 'status', tool: 'openjarvis_link', content: 'Linking Jarvis runtime' })
+
+    let reply = ''
+
+    try {
+      const upstream = await requestJarvis(
+        '/v1/chat/completions',
+        'POST',
+        JSON.stringify({
+          model: DEFAULT_JARVIS_MODEL,
+          messages: toJarvisMessages(history),
+        }),
+      )
+
+      const data = (JSON.parse(upstream.body || 'null') ?? null) as
+        | {
+            choices?: Array<{ message?: { content?: string } }>
+            error?: { message?: string }
+          }
+        | null
+
+      if (upstream.status < 200 || upstream.status >= 300) {
+        throw new Error(data?.error?.message ?? `Jarvis upstream returned ${upstream.status}.`)
+      }
+
+      reply = data?.choices?.[0]?.message?.content?.trim() ?? ''
+      if (!reply) {
+        throw new Error('Jarvis returned an empty reply.')
+      }
+    } catch (error) {
+      try {
+        send({ type: 'status', tool: 'jarvis_cli', content: 'Falling back to direct Jarvis CLI' })
+        reply = await requestJarvisCli(history)
+      } catch {
+        send({ type: 'status', tool: 'gemini_fallback', content: 'Falling back to direct Gemini route' })
+        reply = await requestJarvisGemini(history)
+      }
+    }
+
+    for (let index = 0; index < reply.length; index += 10) {
+      send({ type: 'token', content: reply.slice(index, index + 10) })
+    }
   })
 }

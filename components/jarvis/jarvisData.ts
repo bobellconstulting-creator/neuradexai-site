@@ -17,13 +17,13 @@ export interface JarvisMessage {
 }
 
 export const JARVIS_TEAM: JarvisAgent[] = [
-  { id: 'jarvis',  label: 'J.A.R.V.I.S.',    role: 'Primary Intelligence',   clearance: 'OMEGA', status: 'speaking'   },
-  { id: 'friday',  label: 'F.R.I.D.A.Y.',    role: 'Operations Director',    clearance: 'ALPHA', status: 'processing' },
-  { id: 'edith',   label: 'E.D.I.T.H.',      role: 'Surveillance & Recon',   clearance: 'ALPHA', status: 'idle'       },
-  { id: 'homer',   label: 'H.O.M.E.R.',      role: 'Architecture Systems',   clearance: 'BETA',  status: 'processing' },
-  { id: 'jocasta', label: 'J.O.C.A.S.T.A.', role: 'Neural Defense Matrix',  clearance: 'ALPHA', status: 'idle'       },
-  { id: 'plato',   label: 'P.L.A.T.O.',      role: 'Tactical Analytics',     clearance: 'BETA',  status: 'idle'       },
-  { id: 'vita',    label: 'V.I.T.A.',         role: 'Biosynth Interface',     clearance: 'BETA',  status: 'idle'       },
+  { id: 'jarvis',  label: 'JARVIS',    role: 'Primary Intelligence',   clearance: 'OMEGA', status: 'speaking'   },
+  { id: 'friday',  label: 'NOVA',    role: 'Operations Director',    clearance: 'ALPHA', status: 'processing' },
+  { id: 'edith',   label: 'ECHO',      role: 'Surveillance & Recon',   clearance: 'ALPHA', status: 'idle'       },
+  { id: 'homer',   label: 'TITAN',      role: 'Architecture Systems',   clearance: 'BETA',  status: 'processing' },
+  { id: 'jocasta', label: 'NEXUS', role: 'Neural Defense Matrix',  clearance: 'ALPHA', status: 'idle'       },
+  { id: 'plato',   label: 'ORACLE',      role: 'Tactical Analytics',     clearance: 'BETA',  status: 'idle'       },
+  { id: 'vita',    label: 'ATLAS',         role: 'Biosynth Interface',     clearance: 'BETA',  status: 'idle'       },
 ]
 
 export const JARVIS_STUBS: Record<string, string[]> = {
@@ -37,7 +37,7 @@ export const JARVIS_STUBS: Record<string, string[]> = {
   ],
   friday: [
     'On it. Operations are being redirected immediately.',
-    "F.R.I.D.A.Y. here — processing that now. Stand by.",
+    "NOVA here — processing that now. Stand by.",
     'Got it. Coordinating all available resources.',
     'Acknowledged. Running the numbers as we speak.',
   ],

@@ -1,34 +1,51 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Neuradex AI — Architect Your Digital Empire',
+  title: 'Jarvis / Axon HUD',
   description:
-    'Deploying autonomous AI agent swarms to revolutionize complex industries. The digital factory behind BuckGrid Pro and next-generation AI infrastructure.',
+    'Private holographic command HUD for Jarvis, Axon, and operator-grade agent orchestration.',
   keywords: [
-    'AI agents',
-    'autonomous AI',
-    'agent swarms',
-    'AI SaaS',
-    'BuckGrid Pro',
-    'Neuradex AI',
+    'Jarvis',
+    'Axon',
+    'mission control',
+    'AI HUD',
+    'agent orchestration',
+    'holographic interface',
   ],
   openGraph: {
-    title: 'Neuradex AI — Architect Your Digital Empire',
+    title: 'Jarvis / Axon HUD',
     description:
-      'Deploying autonomous AI agent swarms to revolutionize complex industries.',
-    url: 'https://neuradexai.com',
-    siteName: 'Neuradex AI',
+      'Private holographic command HUD for Jarvis, Axon, and operator-grade agent orchestration.',
+    url: 'https://jarvis-axon-hud.local',
+    siteName: 'Jarvis / Axon HUD',
     locale: 'en_US',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Neuradex AI',
-    description: 'Autonomous AI agent swarms for complex industries.',
+    title: 'Jarvis / Axon HUD',
+    description: 'Private holographic mission control for Jarvis and Axon.',
+  },
+  applicationName: 'Jarvis / Axon HUD',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Jarvis / Axon HUD',
+  },
+  formatDetection: {
+    telephone: false,
   },
   robots: { index: true, follow: true },
-  metadataBase: new URL('https://neuradexai.com'),
+  metadataBase: new URL('https://jarvis-axon-hud.local'),
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: '#000810',
 }
 
 export default function RootLayout({

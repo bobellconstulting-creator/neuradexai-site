@@ -29,10 +29,10 @@ export default function AppSidebar() {
         </div>
         <div>
           <div className="font-display font-black text-neural-text text-sm tracking-tight leading-none">
-            Neuradex<span className="text-neural-cyan">AI</span>
+            Jarvis<span className="text-neural-cyan">/Axon</span>
           </div>
           <div className="font-mono text-[8px] text-neural-muted/50 tracking-[0.2em] mt-0.5">
-            BOARDROOM
+            COMMAND HUD
           </div>
         </div>
       </div>
@@ -135,7 +135,7 @@ export default function AppSidebar() {
           href="/"
           className="block font-mono text-[9px] text-neural-muted/30 hover:text-neural-muted/60 tracking-wider transition-colors"
         >
-          ← LANDING PAGE
+          ← HUD ENTRY
         </Link>
       </div>
     </aside>

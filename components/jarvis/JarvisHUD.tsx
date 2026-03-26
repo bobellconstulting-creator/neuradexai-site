@@ -207,7 +207,7 @@ export default function JarvisHUD({ agents, selectedAgent }: JarvisHUDProps) {
           <ArcReactorIcon />
           <div>
             <div className="text-[#00D4FF] text-xs tracking-[0.35em] font-bold">STARK AI BOARDROOM</div>
-            <div className="text-[#FF8C00] text-[10px] tracking-[0.22em] mt-0.5">J.A.R.V.I.S. ONLINE</div>
+            <div className="text-[#FF8C00] text-[10px] tracking-[0.22em] mt-0.5">JARVIS ONLINE</div>
             <div className="text-[#4FC3F7]/35 text-[8px] tracking-[0.18em] mt-0.5">
               v3.0.2 · CLEARANCE: OMEGA
             </div>

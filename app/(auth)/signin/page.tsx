@@ -50,11 +50,11 @@ function SignInForm() {
             </svg>
           </div>
           <span className="font-display font-black text-neural-text text-lg tracking-tight">
-            Neuradex<span className="text-neural-cyan">AI</span>
+            Jarvis<span className="text-neural-cyan">/Axon</span>
           </span>
         </a>
         <h1 className="font-mono text-[#00F2FF] text-sm tracking-[0.3em] uppercase mb-1">
-          BOARDROOM ACCESS
+          COMMAND HUD ACCESS
         </h1>
         <p className="text-neural-muted text-xs tracking-wider">
           Authenticated personnel only
@@ -78,7 +78,7 @@ function SignInForm() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              placeholder="commander@neuradexai.com"
+              placeholder="commander@jarvis-axon.local"
               className="w-full bg-black/40 border border-neural-indigo-mid/30 rounded-lg px-4 py-2.5 text-sm text-neural-text placeholder:text-neural-muted/30 outline-none focus:border-neural-cyan/50 focus:shadow-cyan-sm transition-all duration-200 font-mono"
             />
           </div>
@@ -124,12 +124,12 @@ function SignInForm() {
               boxShadow: loading ? 'none' : '0 0 20px rgba(0,242,255,0.15)',
             }}
           >
-            {loading ? 'AUTHENTICATING...' : 'ACCESS BOARDROOM ▶'}
+            {loading ? 'AUTHENTICATING...' : 'ENTER COMMAND HUD ▶'}
           </button>
         </div>
 
         <p className="text-center text-neural-muted/40 text-[10px] tracking-wider font-mono">
-          NEURADEX AI — CLASSIFIED OPERATIONS
+          JARVIS / AXON HUD — CLASSIFIED OPERATIONS
         </p>
       </form>
     </motion.div>

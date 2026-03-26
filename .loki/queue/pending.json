@@ -1,0 +1,7 @@
+[
+  {"id": "create-github-repo", "title": "Create bobellconstulting-creator/marcus repo on GitHub", "priority": 1, "status": "pending"},
+  {"id": "build-marcus-railway", "title": "Build Marcus Railway-ready Python bot with Procfile + requirements.txt", "priority": 2, "status": "pending"},
+  {"id": "push-marcus-code", "title": "Push marcus_bot.py + Railway config to new repo", "priority": 3, "status": "pending"},
+  {"id": "deploy-railway", "title": "Deploy to Railway via API", "priority": 4, "status": "pending"},
+  {"id": "update-telegram-webhook", "title": "Switch Telegram webhook to Railway URL, send Marcus online message", "priority": 5, "status": "pending"}
+]

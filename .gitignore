@@ -34,3 +34,5 @@ next-env.d.ts
 # Claude
 .claude/settings.local.json
 .gstack/
+
+.vercel

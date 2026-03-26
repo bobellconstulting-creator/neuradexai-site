@@ -32,27 +32,43 @@ interface Agent {
   color: string
 }
 
+interface OpsTask {
+  id: string
+  title: string
+  status: 'queued' | 'completed'
+  created: string
+  project: string
+  assignedBy: string
+  message: string
+  artifacts?: Array<{
+    kind: 'folder' | 'image' | 'file'
+    path: string
+    label?: string
+    mimeType?: string
+    preview?: string
+  }>
+}
+
 const AGENTS: Agent[] = [
-  { id: 'axon',  label: 'AXON',  role: 'Builder-Operator',   clearance: 'OMEGA', status: 'idle', color: '#00D4FF' },
-  { id: 'aria',  label: 'ARIA',  role: 'Strategic Partner',  clearance: 'ALPHA', status: 'idle', color: '#FF8C00' },
-  { id: 'bo',    label: 'BO',    role: 'Command',            clearance: 'OMEGA', status: 'idle', color: '#22C55E' },
+  { id: 'axon', label: 'AXON', role: 'Builder-Operator', clearance: 'OMEGA', status: 'idle', color: '#00D4FF' },
+  { id: 'jarvis', label: 'JARVIS', role: 'Runtime Intelligence', clearance: 'OMEGA', status: 'idle', color: '#22C55E' },
 ]
 
 // ── Tool icons ─────────────────────────────────────────────────────────────────
 
 const TOOL_ICONS: Record<string, string> = {
-  web_search:          '🔍',
-  fetch_url:           '🌐',
-  telegram_send:       '📤',
-  telegram_read:       '📥',
-  github_repos:        '📁',
-  github_issues:       '🐛',
-  github_create_issue: '✍️',
-  github_read_file:    '📄',
-  exec:                '⚡',
-  read:                '📖',
-  write:               '✏️',
-  edit:                '🔧',
+  openjarvis_link: '🧠',
+  axon_queue: '⚡',
+  gemini_fallback: '☁️',
+  jarvis_cli: '⚙️',
+  filesystem: '🗂️',
+  image_renderer: '🖼️',
+  website_scaffold: '🧱',
+  spec_writer: '📝',
+  exec: '⚡',
+  read: '📖',
+  write: '✏️',
+  edit: '🔧',
 }
 
 // ── Simple markdown renderer ──────────────────────────────────────────────────
@@ -68,6 +84,15 @@ function renderMarkdown(text: string): string {
     .replace(/^# (.+)$/gm, '<div class="mc-h1">$1</div>')
     .replace(/^[-•] (.+)$/gm, '<div class="mc-li">▸ $1</div>')
     .replace(/\n/g, '<br/>')
+}
+
+function trimArtifactPreview(preview?: string, maxLength = 220) {
+  if (!preview) return ''
+  return preview.length > maxLength ? `${preview.slice(0, maxLength).trimEnd()}…` : preview
+}
+
+function buildArtifactHref(filePath: string) {
+  return `/api/artifact?path=${encodeURIComponent(filePath)}`
 }
 
 // ── Status label ──────────────────────────────────────────────────────────────
@@ -87,7 +112,8 @@ export default function MissionControl() {
     {
       id: 'boot',
       role: 'system',
-      content: 'OPENCLAW MISSION CONTROL — ONLINE\nAxon standing by. Aria idle. All systems nominal.\nIssue a directive to begin.',
+      content:
+        'JARVIS / AXON HUD — ONLINE\nJarvis linked to local runtime. Axon linked to the execution engine.\nIssue a directive to begin.',
     },
   ])
   const [input, setInput] = useState('')
@@ -97,6 +123,8 @@ export default function MissionControl() {
   const [chatMode, setChatMode] = useState<'broadcast' | 'private'>('broadcast')
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [listening, setListening] = useState(false)
+  const [projectName, setProjectName] = useState('jarvis-hud')
+  const [opsTasks, setOpsTasks] = useState<OpsTask[]>([])
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLTextAreaElement>(null)
@@ -108,38 +136,66 @@ export default function MissionControl() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    let cancelled = false
+
+    const loadAxonStatus = async () => {
+      try {
+        const response = await fetch('/api/axon/status', { cache: 'no-store' })
+        if (!response.ok) return
+
+        const data = (await response.json()) as {
+          queued?: OpsTask[]
+          completed?: OpsTask[]
+        }
+
+        if (cancelled) return
+        setOpsTasks([...(data.queued ?? []), ...(data.completed ?? [])])
+      } catch {
+        // Leave current task state in place if polling fails.
+      }
+    }
+
+    loadAxonStatus()
+    const interval = window.setInterval(loadAxonStatus, 8000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [])
+
   // ── Send message ────────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || status !== 'idle') return
 
-    const targetAgent = chatMode === 'private' && selectedAgentId 
-      ? AGENTS.find(a => a.id === selectedAgentId) || AGENTS[0]
-      : AGENTS[0] // Default to Axon for broadcast
+    const targetAgents =
+      chatMode === 'private' && selectedAgentId
+        ? [AGENTS.find((agent) => agent.id === selectedAgentId) || AGENTS[0]]
+        : AGENTS
 
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      agentId: targetAgent.id,
+      agentId: targetAgents.length === 1 ? targetAgents[0].id : 'broadcast',
       content: text.trim(),
     }
 
-    const agentMsgId = (Date.now() + 1).toString()
-    const agentMsg: Message = {
-      id: agentMsgId,
-      role: 'agent',
-      agentId: targetAgent.id,
+    const agentMessages = targetAgents.map((agent, index) => ({
+      id: `${Date.now()}-${agent.id}-${index}`,
+      role: 'agent' as const,
+      agentId: agent.id,
       content: '',
       streaming: true,
-      toolCalls: [],
-    }
+      toolCalls: [] as ToolCall[],
+    }))
 
-    setMessages((prev) => [...prev, userMsg, agentMsg])
+    setMessages((prev) => [...prev, userMsg, ...agentMessages])
     setInput('')
     setStatus('thinking')
-    setActiveAgent(targetAgent)
+    setActiveAgent(targetAgents[0])
 
-    // Build history for API
     const history = [...messages, userMsg]
       .filter((m) => m.role === 'user' || m.role === 'agent')
       .map((m) => ({
@@ -148,115 +204,140 @@ export default function MissionControl() {
       }))
 
     try {
-      const res = await fetch('/api/jarvis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: history }),
-      })
+      await Promise.all(
+        targetAgents.map(async (agent, index) => {
+          const agentMsgId = agentMessages[index].id
+          const route = agent.id === 'axon' ? '/api/axon' : '/api/jarvis'
+          const res = await fetch(route, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messages: history,
+              project: projectName.trim() || 'shared',
+              title: agent.id === 'axon' ? `${projectName.trim() || 'shared'} :: ${text.trim()}` : undefined,
+            }),
+          })
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
-      const reader = res.body!.getReader()
-      const dec = new TextDecoder()
-      let buf = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const raw = line.slice(6).trim()
-          if (!raw) continue
-
-          let evt: { type: string; content?: string; tool?: string; args?: Record<string, unknown> }
-          try { evt = JSON.parse(raw) } catch { continue }
-
-          switch (evt.type) {
-            case 'status':
-              setStatus('working')
-              setActiveTool(evt.tool)
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === agentMsgId
-                    ? {
-                        ...m,
-                        toolCalls: [
-                          ...(m.toolCalls ?? []),
-                          { tool: evt.tool!, args: evt.args, status: 'running' },
-                        ],
-                      }
-                    : m
-                )
-              )
-              break
-
-            case 'tool_result':
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === agentMsgId
-                    ? {
-                        ...m,
-                        toolCalls: m.toolCalls?.map((tc) =>
-                          tc.tool === evt.tool && tc.status === 'running'
-                            ? { ...tc, result: evt.content, status: 'done' }
-                            : tc
-                        ),
-                      }
-                    : m
-                )
-              )
-              break
-
-            case 'token':
-              setStatus('responding')
-              setActiveTool(undefined)
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === agentMsgId ? { ...m, content: m.content + (evt.content ?? '') } : m
-                )
-              )
-              break
-
-            case 'done':
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === agentMsgId ? { ...m, streaming: false } : m
-                )
-              )
-              setStatus('idle')
-              setActiveTool(undefined)
-              break
-
-            case 'error':
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === agentMsgId
-                    ? { ...m, content: `⚠️ Error: ${evt.content}`, streaming: false }
-                    : m
-                )
-              )
-              setStatus('idle')
-              break
+          if (!res.ok || !res.body) {
+            throw new Error(`${agent.label} bridge returned HTTP ${res.status}`)
           }
-        }
-      }
+
+          const reader = res.body.getReader()
+          const dec = new TextDecoder()
+          let buf = ''
+
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buf += dec.decode(value, { stream: true })
+
+            const lines = buf.split('\n')
+            buf = lines.pop() ?? ''
+
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue
+              const raw = line.slice(6).trim()
+              if (!raw) continue
+
+              let evt:
+                | { type: string; content?: string; tool?: string; args?: Record<string, unknown> }
+                | { type: 'task_created'; task?: OpsTask }
+              try {
+                evt = JSON.parse(raw)
+              } catch {
+                continue
+              }
+
+              switch (evt.type) {
+                case 'status':
+                  setStatus('working')
+                  setActiveAgent(agent)
+                  setActiveTool(evt.tool)
+                  setMessages((prev) =>
+                    prev.map((message) =>
+                      message.id === agentMsgId
+                        ? {
+                            ...message,
+                            toolCalls: [
+                              ...(message.toolCalls ?? []),
+                              { tool: evt.tool!, args: evt.args, status: 'running' },
+                            ],
+                          }
+                        : message
+                    )
+                  )
+                  break
+
+                case 'task_created':
+                  if ('task' in evt && evt.task) {
+                    const task = evt.task
+                    setOpsTasks((prev) => {
+                      const next = [task, ...prev.filter((existingTask) => existingTask.id !== task.id)]
+                      return next.slice(0, 12)
+                    })
+                  }
+                  break
+
+                case 'token':
+                  setStatus('responding')
+                  setActiveAgent(agent)
+                  setActiveTool(undefined)
+                  setMessages((prev) =>
+                    prev.map((message) =>
+                      message.id === agentMsgId
+                        ? { ...message, content: message.content + (evt.content ?? '') }
+                        : message
+                    )
+                  )
+                  break
+
+                case 'error':
+                  setMessages((prev) =>
+                    prev.map((message) =>
+                      message.id === agentMsgId
+                        ? { ...message, content: `⚠️ Error: ${evt.content}`, streaming: false }
+                        : message
+                    )
+                  )
+                  break
+
+                case 'done':
+                  setMessages((prev) =>
+                    prev.map((message) =>
+                      message.id === agentMsgId
+                        ? {
+                            ...message,
+                            streaming: false,
+                            toolCalls: message.toolCalls?.map((toolCall) =>
+                              toolCall.status === 'running'
+                                ? { ...toolCall, status: 'done' }
+                                : toolCall
+                            ),
+                          }
+                        : message
+                    )
+                  )
+                  break
+              }
+            }
+          }
+        })
+      )
+
+      setStatus('idle')
+      setActiveTool(undefined)
     } catch (err) {
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === agentMsgId
-            ? { ...m, content: `⚠️ Connection error: ${err}`, streaming: false }
-            : m
+        prev.map((message) =>
+          agentMessages.some((agentMessage) => agentMessage.id === message.id)
+            ? { ...message, content: `⚠️ Connection error: ${err}`, streaming: false }
+            : message
         )
       )
       setStatus('idle')
       setActiveTool(undefined)
     }
-  }, [messages, status, chatMode, selectedAgentId])
+  }, [messages, status, chatMode, selectedAgentId, projectName])
 
   // ── Keyboard handler ────────────────────────────────────────────────────────
 
@@ -311,7 +392,7 @@ export default function MissionControl() {
       {
         id: 'boot-' + Date.now(),
         role: 'system',
-        content: 'MISSION CONTROL — CLEARED\nNew session started.',
+        content: 'JARVIS / AXON HUD — CLEARED\nNew session started.',
       },
     ])
   }
@@ -329,6 +410,8 @@ export default function MissionControl() {
   }
 
   const selectedAgent = AGENTS.find(a => a.id === selectedAgentId) || null
+  const queuedTasks = opsTasks.filter((task) => task.status === 'queued')
+  const completedTasks = opsTasks.filter((task) => task.status === 'completed')
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -348,9 +431,9 @@ export default function MissionControl() {
       {/* ── Top status bar ── */}
       <header className="mc-header">
         <div className="mc-header-left">
-          <span className="mc-logo">⬡ OPENCLAW</span>
+          <span className="mc-logo">⬡ JARVIS / AXON</span>
           <span className="mc-divider">│</span>
-          <span className="mc-subtitle">MISSION CONTROL v1.0</span>
+          <span className="mc-subtitle">COMMAND HUD v1.0</span>
         </div>
         <div className="mc-header-center">
           <motion.div
@@ -409,6 +492,88 @@ export default function MissionControl() {
               </div>
             </button>
           ))}
+        </div>
+
+        <div className="mc-ops-board">
+          <div className="mc-agent-header">OPERATIONS BOARD</div>
+          <label className="mc-project-label">
+            ACTIVE PROJECT
+            <input
+              className="mc-project-input"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="jarvis-hud"
+            />
+          </label>
+
+          <div className="mc-ops-metrics">
+            <div className="mc-ops-card">
+              <div className="mc-ops-value">{queuedTasks.length}</div>
+              <div className="mc-ops-label">Queued</div>
+            </div>
+            <div className="mc-ops-card">
+              <div className="mc-ops-value">{completedTasks.length}</div>
+              <div className="mc-ops-label">Completed</div>
+            </div>
+          </div>
+
+          <div className="mc-task-stack">
+            {opsTasks.length === 0 ? (
+              <div className="mc-task-empty">No tracked Axon tasks yet.</div>
+            ) : (
+              opsTasks.slice(0, 6).map((task) => (
+                <div key={task.id} className="mc-task-card">
+                  <div className="mc-task-topline">
+                    <span className="mc-task-project">{task.project}</span>
+                    <span className={`mc-task-status mc-task-status-${task.status}`}>{task.status}</span>
+                  </div>
+                  <div className="mc-task-title">{task.title}</div>
+                  {task.artifacts && task.artifacts.length > 0 && (
+                    <div className="mc-task-artifacts">
+                      {task.artifacts.map((artifact) => (
+                        <div key={`${task.id}-${artifact.path}`} className="mc-task-artifact">
+                          <span className="mc-task-artifact-kind">{artifact.kind}</span>
+                          {artifact.label && <span className="mc-task-artifact-label">{artifact.label}</span>}
+                          <span className="mc-task-artifact-path">{artifact.path}</span>
+                          <div className="mc-task-artifact-actions">
+                            <a
+                              className="mc-task-artifact-link"
+                              href={buildArtifactHref(artifact.path)}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              OPEN
+                            </a>
+                          </div>
+                          {artifact.mimeType === 'image/svg+xml' && artifact.preview && (
+                            <div
+                              className="mc-task-artifact-preview mc-task-artifact-preview-image"
+                              dangerouslySetInnerHTML={{ __html: artifact.preview }}
+                            />
+                          )}
+                          {artifact.mimeType === 'text/html' && artifact.preview && (
+                            <iframe
+                              className="mc-task-artifact-preview mc-task-artifact-preview-frame"
+                              title={artifact.label || artifact.path}
+                              srcDoc={artifact.preview}
+                            />
+                          )}
+                          {artifact.mimeType?.startsWith('text/') && artifact.mimeType !== 'text/html' && artifact.preview && (
+                            <pre className="mc-task-artifact-preview mc-task-artifact-preview-text">
+                              {trimArtifactPreview(artifact.preview)}
+                            </pre>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mc-task-meta">
+                    {new Date(task.created).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
         
         {/* Mode toggle */}
@@ -713,6 +878,192 @@ export default function MissionControl() {
         .mc-agent-status { font-size: 9px; letter-spacing: 0.5px; }
 
         /* Mode toggle */
+        .mc-ops-board {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          padding-top: 8px;
+          border-top: 1px solid var(--border);
+        }
+        .mc-project-label {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          font-size: 10px;
+          color: rgba(0,212,255,0.45);
+          letter-spacing: 1.6px;
+        }
+        .mc-project-input {
+          background: rgba(0,20,40,0.48);
+          border: 1px solid rgba(0,212,255,0.18);
+          border-radius: 4px;
+          color: var(--text);
+          font-family: inherit;
+          font-size: 12px;
+          padding: 8px 10px;
+          outline: none;
+        }
+        .mc-project-input:focus { border-color: rgba(0,212,255,0.4); }
+        .mc-ops-metrics {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+        }
+        .mc-ops-card {
+          border: 1px solid rgba(0,212,255,0.12);
+          background: rgba(0,20,40,0.34);
+          border-radius: 4px;
+          padding: 10px;
+        }
+        .mc-ops-value {
+          color: var(--cyan);
+          font-size: 20px;
+          font-weight: 700;
+        }
+        .mc-ops-label {
+          color: var(--dim);
+          font-size: 10px;
+          letter-spacing: 1px;
+        }
+        .mc-task-stack {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          max-height: 240px;
+          overflow-y: auto;
+        }
+        .mc-task-empty {
+          border: 1px dashed rgba(0,212,255,0.16);
+          border-radius: 4px;
+          color: var(--dim);
+          font-size: 11px;
+          padding: 10px;
+        }
+        .mc-task-card {
+          border: 1px solid rgba(0,212,255,0.12);
+          background: rgba(0,20,40,0.34);
+          border-radius: 4px;
+          padding: 10px;
+          box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02), 0 14px 28px rgba(0,0,0,0.16);
+        }
+        .mc-task-topline {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+        .mc-task-project {
+          color: rgba(0,212,255,0.55);
+          font-size: 9px;
+          letter-spacing: 1.4px;
+          text-transform: uppercase;
+        }
+        .mc-task-status {
+          font-size: 9px;
+          letter-spacing: 1.2px;
+          text-transform: uppercase;
+        }
+        .mc-task-status-queued { color: #f97316; }
+        .mc-task-status-completed { color: #22C55E; }
+        .mc-task-title {
+          color: var(--text);
+          font-size: 12px;
+          line-height: 1.5;
+        }
+        .mc-task-meta {
+          color: var(--dim);
+          font-size: 10px;
+          margin-top: 6px;
+        }
+        .mc-task-artifacts {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          margin-top: 8px;
+        }
+        .mc-task-artifact {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          padding: 6px 8px;
+          border-radius: 4px;
+          background: rgba(0,0,0,0.24);
+          border: 1px solid rgba(0,212,255,0.1);
+        }
+        .mc-task-artifact-kind {
+          color: rgba(0,212,255,0.5);
+          font-size: 9px;
+          letter-spacing: 1.2px;
+          text-transform: uppercase;
+        }
+        .mc-task-artifact-label {
+          color: #dff7ff;
+          font-size: 11px;
+          font-weight: 600;
+          line-height: 1.4;
+        }
+        .mc-task-artifact-path {
+          color: var(--text);
+          font-size: 10px;
+          line-height: 1.4;
+          word-break: break-all;
+        }
+        .mc-task-artifact-actions {
+          display: flex;
+          gap: 8px;
+          margin-top: 6px;
+        }
+        .mc-task-artifact-link {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 64px;
+          padding: 6px 10px;
+          border-radius: 999px;
+          border: 1px solid rgba(52,211,153,0.28);
+          color: #caffea;
+          text-decoration: none;
+          font-size: 9px;
+          letter-spacing: 1.5px;
+          background: rgba(52,211,153,0.08);
+        }
+        .mc-task-artifact-link:hover {
+          border-color: rgba(0,212,255,0.4);
+          color: #ecfbff;
+        }
+        .mc-task-artifact-preview {
+          margin-top: 6px;
+          border-radius: 6px;
+          overflow: hidden;
+          border: 1px solid rgba(0,212,255,0.12);
+          background: rgba(2, 8, 18, 0.8);
+        }
+        .mc-task-artifact-preview-image {
+          max-height: 120px;
+        }
+        .mc-task-artifact-preview-frame {
+          width: 100%;
+          height: 180px;
+          display: block;
+          border: 0;
+          background: #020611;
+        }
+        .mc-task-artifact-preview-image svg {
+          display: block;
+          width: 100%;
+          height: auto;
+        }
+        .mc-task-artifact-preview-text {
+          margin: 0;
+          padding: 8px 10px;
+          color: #b7d9ea;
+          font-size: 10px;
+          line-height: 1.45;
+          white-space: pre-wrap;
+          word-break: break-word;
+          font-family: "Consolas", "SFMono-Regular", monospace;
+        }
         .mc-mode-toggle {
           margin-top: auto;
           display: flex;

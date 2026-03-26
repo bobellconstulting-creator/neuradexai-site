@@ -211,6 +211,43 @@ async function historyWrite(chatId: number, msgs: HistoryMessage[]): Promise<voi
   )
 }
 
+// ─── GITHUB FILE TOOLS ────────────────────────────────────────────────────────
+async function githubFileRead(repo: string, path: string): Promise<string> {
+  const content = await readGitHubFile(path)
+  if (!content) return `No file found at ${repo}/${path}`
+  return content.slice(0, 4000)
+}
+
+async function githubFileWrite(path: string, content: string, message: string): Promise<string> {
+  await writeGitHubFile(path, content, message)
+  return `Written to ${MEMORY_REPO}/${path}`
+}
+
+async function githubCreateIssue(title: string, body: string): Promise<string> {
+  try {
+    const r = await fetch(`https://api.github.com/repos/${MEMORY_REPO}/issues`, {
+      method: 'POST',
+      headers: { Authorization: `token ${GITHUB_TOKEN}`, Accept: 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, body }),
+    })
+    const data = await r.json() as { html_url?: string; number?: number }
+    return data.html_url ? `Issue #${data.number} created: ${data.html_url}` : 'Issue creation failed'
+  } catch (e) { return `GitHub error: ${e}` }
+}
+
+// ─── SMS ──────────────────────────────────────────────────────────────────────
+async function smsSend(message: string): Promise<string> {
+  try {
+    const r = await fetch('https://textbelt.com/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: process.env.BO_PHONE ?? '', message, key: process.env.TEXTBELT_KEY ?? '' }),
+    })
+    const data = await r.json() as { success: boolean; quotaRemaining?: number; error?: string }
+    return data.success ? `SMS sent. Quota remaining: ${data.quotaRemaining}` : `SMS failed: ${data.error}`
+  } catch (e) { return `SMS error: ${e}` }
+}
+
 async function marketAppend(content: string): Promise<string> {
   const existing = await readGitHubFile(MARKET_PATH)
   const ts = new Date().toISOString().slice(0, 10)
@@ -287,6 +324,38 @@ const TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'github_read',
+      description: 'Read a file from the GitHub repo. Use to check code, docs, notes.',
+      parameters: { type: 'object', properties: { repo: { type: 'string', description: 'repo name' }, path: { type: 'string' } }, required: ['repo', 'path'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'github_write',
+      description: 'Write a file to GitHub. Use to save research docs, notes, reports.',
+      parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' }, message: { type: 'string' } }, required: ['path', 'content', 'message'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'github_issue',
+      description: 'Create a GitHub issue to track a task or idea.',
+      parameters: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } }, required: ['title', 'body'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'sms_send',
+      description: 'Send Bo an SMS text message for urgent alerts.',
+      parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'vercel_list',
       description: 'List recent Vercel deployments and their status.',
       parameters: { type: 'object', properties: {} },
@@ -303,6 +372,10 @@ async function executeTool(name: string, args: Record<string, string>): Promise<
     case 'memory_read':   return await memoryRead()
     case 'memory_append': return await memoryAppend(args.content)
     case 'market_append': return await marketAppend(args.content)
+    case 'github_read':   return await githubFileRead(args.repo, args.path)
+    case 'github_write':  return await githubFileWrite(args.path, args.content, args.message ?? 'Marcus: file update')
+    case 'github_issue':  return await githubCreateIssue(args.title, args.body)
+    case 'sms_send':      return await smsSend(args.message)
     case 'vercel_list':   return await vercelList()
     default:              return `Unknown tool: ${name}`
   }

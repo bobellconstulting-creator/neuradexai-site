@@ -1,106 +1,103 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import JarvisHUD from '@/components/jarvis/JarvisHUD'
 import JarvisChat from '@/components/jarvis/JarvisChat'
-import {
-  JARVIS_TEAM,
-  JARVIS_STUBS,
-  BROADCAST_STUBS,
-  type JarvisMessage,
-} from '@/components/jarvis/jarvisData'
+import JarvisApproval from '@/components/jarvis/JarvisApproval'
+import { JARVIS_TEAM, type JarvisMessage } from '@/components/jarvis/jarvisData'
+import { useJarvisWS } from '@/hooks/useJarvisWS'
 
-// Load 3D scene client-side only (Three.js requires browser)
 const JarvisScene = dynamic(() => import('@/components/jarvis/JarvisScene'), { ssr: false })
 
 export default function JarvisPage() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [chatMode, setChatMode]               = useState<'private' | 'broadcast'>('broadcast')
-  const [messages, setMessages]               = useState<JarvisMessage[]>([
-    {
-      id:     '0',
-      agentId: 'jarvis',
-      role:   'agent',
-      text:   'Good evening. J.A.R.V.I.S. boardroom is online. All agents are standing by. How may I assist?',
-      ts:     Date.now() - 5000,
-    },
-  ])
+  const [isSpeaking, setIsSpeaking]           = useState(false)
+  const audioLevelRef                         = useRef<number>(0)
+
+  const {
+    connected,
+    state: agentState,
+    messages: wsMessages,
+    streamingText,
+    pendingToolCalls,
+    send,
+    approve,
+    deny,
+    mode,
+  } = useJarvisWS()
+
+  const messages: JarvisMessage[] = wsMessages.map(m => ({
+    id:      m.id,
+    agentId: m.role === 'user' ? (selectedAgentId ?? 'broadcast') : 'jarvis',
+    role:    m.role === 'user' ? 'user' : 'agent',
+    text:    m.content,
+    ts:      m.ts,
+  }))
+
+  if (streamingText) {
+    messages.push({ id: 'streaming', agentId: 'jarvis', role: 'agent', text: streamingText + '▌', ts: Date.now() })
+  }
 
   const selectedAgent = JARVIS_TEAM.find(a => a.id === selectedAgentId) ?? null
+  const isThinking    = agentState === 'thinking' || agentState === 'acting'
 
-  function handleSelectAgent(agentId: string) {
-    if (agentId === selectedAgentId) {
-      setSelectedAgentId(null)
-      setChatMode('broadcast')
-    } else {
-      setSelectedAgentId(agentId)
-      setChatMode('private')
-    }
-  }
-
-  function handleSend(text: string) {
-    const targetId = chatMode === 'private' && selectedAgentId ? selectedAgentId : 'broadcast'
-
-    const userMsg: JarvisMessage = {
-      id:      `${Date.now()}-u`,
-      agentId: targetId,
-      role:    'user',
-      text,
-      ts:      Date.now(),
-    }
-    setMessages(prev => [...prev, userMsg].slice(-30))
-
-    // Simulate OpenClaw agent response (replace setTimeout with real WS call)
-    setTimeout(() => {
-      const responderId = chatMode === 'private' && selectedAgentId ? selectedAgentId : 'jarvis'
-      const responder   = JARVIS_TEAM.find(a => a.id === responderId)!
-      const stubs       = chatMode === 'broadcast' ? BROADCAST_STUBS : (JARVIS_STUBS[responderId] ?? JARVIS_STUBS.jarvis)
-      const reply       = stubs[Math.floor(Math.random() * stubs.length)]
-
-      const agentMsg: JarvisMessage = {
-        id:      `${Date.now()}-a`,
-        agentId: targetId,
-        role:    'agent',
-        text:    `[${responder.label}] ${reply}`,
-        ts:      Date.now(),
-      }
-      setMessages(prev => [...prev, agentMsg].slice(-30))
-    }, 900 + Math.random() * 700)
-  }
+  const agentTeam = JARVIS_TEAM.map(agent => ({
+    ...agent,
+    status: agent.id === 'jarvis'
+      ? (isThinking ? 'processing' : agentState === 'idle' ? 'idle' : agentState === 'offline' ? 'alert' : isSpeaking ? 'speaking' : 'idle')
+      : agent.status,
+  }))
 
   return (
     <div className="fixed inset-0 overflow-hidden" style={{ background: '#000810' }}>
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: 'radial-gradient(ellipse at 50% 60%, rgba(0,55,110,0.22) 0%, rgba(0,10,28,0.75) 55%, #000810 100%)',
+      }} />
 
-      {/* Deep holographic background glow */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background:
-            'radial-gradient(ellipse at 50% 60%, rgba(0,55,110,0.22) 0%, rgba(0,10,28,0.75) 55%, #000810 100%)',
-        }}
-      />
+      {/* Connection status */}
+      <div className="absolute top-4 right-4 z-30 flex items-center gap-2 text-[10px] tracking-widest font-mono">
+        <div className={`w-2 h-2 rounded-full ${connected ? 'bg-[#00D4FF]' : 'bg-red-500'} animate-pulse`}
+          style={{ boxShadow: connected ? '0 0 6px #00D4FF' : '0 0 6px #FF3B30' }} />
+        <span className={connected ? 'text-[#00D4FF]/60' : 'text-red-400/60'}>
+          {connected ? `JARVIS ONLINE · ${mode.toUpperCase()}` : 'OFFLINE'}
+        </span>
+      </div>
 
-      {/* 3D holographic scene */}
+      {/* Voice-reactive 3D scene */}
       <JarvisScene
-        agents={JARVIS_TEAM}
+        agents={agentTeam}
         selectedAgentId={selectedAgentId}
-        onSelectAgent={handleSelectAgent}
+        onSelectAgent={id => {
+          if (id === selectedAgentId) { setSelectedAgentId(null); setChatMode('broadcast') }
+          else { setSelectedAgentId(id); setChatMode('private') }
+        }}
+        audioLevel={audioLevelRef}
+        isSpeaking={isSpeaking}
+        isThinking={isThinking}
       />
 
-      {/* Iron Man HUD overlay */}
-      <JarvisHUD agents={JARVIS_TEAM} selectedAgent={selectedAgent} />
+      <JarvisHUD agents={agentTeam} selectedAgent={selectedAgent} />
 
-      {/* JARVIS chat interface */}
+      {pendingToolCalls.filter(tc => tc.status === 'pending').length > 0 && (
+        <JarvisApproval
+          pendingToolCalls={pendingToolCalls.filter(tc => tc.status === 'pending')}
+          onApprove={approve}
+          onDeny={deny}
+        />
+      )}
+
       <JarvisChat
-        agents={JARVIS_TEAM}
+        agents={agentTeam}
         selectedAgent={selectedAgent}
         chatMode={chatMode}
         messages={messages}
-        onSend={handleSend}
-        onToggleMode={() =>
-          setChatMode(m => (m === 'private' ? 'broadcast' : 'private'))
-        }
+        onSend={text => { send(text) }}
+        onToggleMode={() => setChatMode(m => m === 'private' ? 'broadcast' : 'private')}
+        agentState={agentState}
+        onAudioLevel={v => { audioLevelRef.current = v }}
+        onSpeakingChange={setIsSpeaking}
       />
     </div>
   )
