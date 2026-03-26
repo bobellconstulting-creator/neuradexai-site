@@ -1,5 +1,10 @@
 'use client'
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SpeechRecognition = any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SpeechRecognitionEvent = any
+
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import type { JarvisAgent, JarvisMessage } from './jarvisData'
