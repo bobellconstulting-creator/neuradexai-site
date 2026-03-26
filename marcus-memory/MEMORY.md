@@ -71,3 +71,5 @@
 - Memory persistence (via memory_append/read)
 - Vercel deployment monitoring
 - Direct communication with Bo
+
+[2026-03-26T21:51] Bo requested a comparison chart of me (Marcus) vs successful income-generating AI agents (Felix, Ron, Henry, Adam, Rosemary). Chart created and formatted for saving to Marcus Docs folder on desktop.
