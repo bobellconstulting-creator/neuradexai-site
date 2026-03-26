@@ -1,12 +1,1 @@
-{
-  "crons": [
-    {
-      "path": "/api/marcus/cron?job=morning",
-      "schedule": "0 14 * * 1-5"
-    },
-    {
-      "path": "/api/marcus/cron?job=heartbeat",
-      "schedule": "0 18 * * *"
-    }
-  ]
-}
+{}
