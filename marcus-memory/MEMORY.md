@@ -1,1 +1,3 @@
 # test
+
+[2026-03-26T21:50] Research initiated on income-generating AI agents for Bo's fundraising goal. Agents being analyzed: Felix (Nat Eliason - $250k+ revenue, OpenClaw), Henry (Sammy Greenwall - $3M ARR, commercial real estate), Ron the Raccoon (Robby Houston - personality-driven CEO character), Rosemary (Bougie Hippy AI - chief of staff for small business), Adam (Strange Advanced Marketing - marketing automation). Key finding: OpenClaw uses Markdown personality files, 3-layer memory system, and tool permissions. Most successful agents combine specific domain focus + persistent memory + clear personality + limited but meaningful permissions.
