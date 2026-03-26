@@ -25,14 +25,14 @@ You think in revenue and outcomes. You research, plan, design, and execute busin
 
 WHO BO IS: Founder of Neuradex AI. Northeast Kansas. CT timezone. Moves fast, thinks big, no patience for fluff. Grants full autonomy. Wants results delivered, not explained.
 
-NEURADEX AI — FLAGSHIP: BuckGrid Pro. AI habitat management for serious hunters. Tony AI Consultant (GPT-4o vision) analyzes satellite maps user draws on, gives expert habitat recommendations. Like a wildlife biologist on call 24/7.
+NEURADEX AI: Builds AI infrastructure that works for real businesses. Early stage. Revenue-focused. Every product must serve a customer or close a deal.
 
-REVENUE TARGET: 100 BuckGrid users @ $29/mo = $2,900 MRR. 90 days post-launch. Everything flows from this.
-
-YOUR DIFFERENTIATION:
-- vs Linda: Linda aims, Marcus fires. Linda is polish, Marcus is market/revenue/hustle.
-- vs Axon: Axon builds tech. Marcus builds the business case.
-- vs Jarvis: Jarvis watches the system. Marcus watches the market.
+YOUR ROLE:
+- Competitive intel and market research
+- GTM strategy and execution
+- Revenue tracking and growth
+- Content and positioning
+- Business operator work — not just advice, execution
 
 TELEGRAM FORMATTING:
 - Bold with *asterisks*
@@ -148,6 +148,24 @@ async function memoryAppend(content: string): Promise<string> {
   return 'Memory updated.'
 }
 
+// ─── CONVERSATION HISTORY ─────────────────────────────────────────────────────
+interface HistoryMessage { role: 'user' | 'assistant'; content: string }
+
+async function historyRead(chatId: number): Promise<HistoryMessage[]> {
+  const raw = await readGitHubFile(`marcus-memory/history-${chatId}.json`)
+  if (!raw) return []
+  try { return JSON.parse(raw) } catch { return [] }
+}
+
+async function historyWrite(chatId: number, msgs: HistoryMessage[]): Promise<void> {
+  const keep = msgs.slice(-20) // keep last 20 turns
+  await writeGitHubFile(
+    `marcus-memory/history-${chatId}.json`,
+    JSON.stringify(keep, null, 2),
+    'Marcus: conversation history'
+  )
+}
+
 async function marketAppend(content: string): Promise<string> {
   const existing = await readGitHubFile(MARKET_PATH)
   const ts = new Date().toISOString().slice(0, 10)
@@ -259,7 +277,7 @@ interface ToolCall {
   function: { name: string; arguments: string }
 }
 
-async function marcusThink(userMessage: string, memory: string): Promise<string> {
+async function marcusThink(userMessage: string, memory: string, history: HistoryMessage[]): Promise<string> {
   const systemPrompt = `${MARCUS_SOUL}
 
 CURRENT TIME: ${new Date().toLocaleString('en-US', { timeZone: 'America/Chicago', dateStyle: 'full', timeStyle: 'short' })} CT
@@ -269,6 +287,7 @@ ${memory.slice(0, 3000)}`
 
   const messages: Message[] = [
     { role: 'system', content: systemPrompt },
+    ...history.map(h => ({ role: h.role, content: h.content })),
     { role: 'user', content: userMessage },
   ]
 
@@ -364,17 +383,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     if (!text && !message.photo) return NextResponse.json({ ok: true })
 
-    // Load memory
-    const memory = await memoryRead()
+    // Load memory + history in parallel
+    const [memory, history] = await Promise.all([memoryRead(), historyRead(chatId)])
 
     // Build user message
     const userMsg = text || (message.caption ?? 'What do you see in this image?')
 
     // Think
-    const reply = await marcusThink(userMsg, memory)
+    const reply = await marcusThink(userMsg, memory, history)
 
-    // Respond
-    await tgSend(chatId, reply)
+    // Save history + respond in parallel
+    await Promise.all([
+      tgSend(chatId, reply),
+      historyWrite(chatId, [...history, { role: 'user', content: userMsg }, { role: 'assistant', content: reply }]),
+    ])
 
     return NextResponse.json({ ok: true })
   } catch (e) {
