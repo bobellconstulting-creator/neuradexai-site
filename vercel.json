@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/marcus/cron?job=heartbeat",
-      "schedule": "*/30 * * * *"
+      "schedule": "0 18 * * *"
     }
   ]
 }
