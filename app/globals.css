@@ -78,3 +78,247 @@
   .animate-delay-400 { animation-delay: 400ms; }
   .animate-delay-500 { animation-delay: 500ms; }
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   MISSION CONTROL HUD — Neural Noir × War-Room (brass/copper × cyan)
+   Ported & fused from mission-control bones.
+   ────────────────────────────────────────────────────────────────── */
+
+:root {
+  --mc-bg:           #050714;
+  --mc-bg-2:         #0a0d1f;
+  --mc-surface:      rgba(10, 15, 32, 0.78);
+  --mc-surface-2:    rgba(14, 22, 44, 0.62);
+  --mc-border:       rgba(0, 212, 255, 0.18);
+  --mc-border-warm:  rgba(239, 179, 86, 0.22);
+  --mc-cyan:         #00d4ff;
+  --mc-cyan-dim:     rgba(0, 212, 255, 0.35);
+  --mc-violet:       #7b5cf0;
+  --mc-emerald:      #34d399;
+  --mc-amber:        #f59e0b;
+  --mc-ember:        #ff6a55;
+  --mc-brass:        #efb356;
+  --mc-copper:       #ff8460;
+  --mc-sand:         #dbe8f7;
+  --mc-text:         #edf3ff;
+  --mc-text-dim:     #8aa0bf;
+  --mc-text-mute:    #5a6c87;
+}
+
+/* Page shell */
+.mc-root {
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 18%, rgba(0, 212, 255, 0.10), transparent 45%),
+    radial-gradient(ellipse at 80% 12%, rgba(239, 179, 86, 0.07), transparent 40%),
+    radial-gradient(ellipse at 60% 85%, rgba(123, 92, 240, 0.10), transparent 50%),
+    linear-gradient(180deg, #03060f 0%, #060a1c 50%, #03060f 100%);
+  color: var(--mc-text);
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow: hidden;
+}
+
+/* Blueprint grid (subtle) */
+.mc-grid-bg {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 212, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.035) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse at center, black 35%, transparent 95%);
+  pointer-events: none;
+}
+
+/* Scanline overlay (CRT, ~2% opacity) */
+.mc-scanlines {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2px,
+    rgba(0, 212, 255, 0.04) 3px,
+    transparent 4px
+  );
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.5;
+}
+
+/* Sweeping scan bar */
+.mc-scanbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 212, 255, 0.55), transparent);
+  animation: mc-scan 12s linear infinite;
+  pointer-events: none;
+  z-index: 5;
+}
+
+@keyframes mc-scan {
+  0%   { top: -2%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: 102%; opacity: 0; }
+}
+
+/* Panels */
+.mc-panel {
+  position: relative;
+  border: 1px solid var(--mc-border);
+  background:
+    linear-gradient(180deg, rgba(10, 16, 34, 0.86), rgba(6, 10, 22, 0.74));
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 50px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+}
+.mc-panel::before {
+  content: '';
+  position: absolute;
+  left: 14px; right: 14px; top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--mc-brass), transparent);
+  opacity: 0.55;
+}
+
+/* Corner brackets */
+.mc-corners::after,
+.mc-corners::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--mc-brass);
+  opacity: 0.7;
+}
+.mc-corners::before {
+  top: 6px; left: 6px;
+  border-right: none;
+  border-bottom: none;
+}
+.mc-corners::after {
+  bottom: 6px; right: 6px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Micro-cap labels */
+.mc-label {
+  font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--mc-text-dim);
+}
+.mc-label-brass { color: var(--mc-brass); }
+.mc-label-cyan  { color: var(--mc-cyan); }
+
+.mc-mono {
+  font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+}
+
+/* Status dots */
+.mc-dot {
+  width: 8px; height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.mc-dot-on    { background: var(--mc-emerald); box-shadow: 0 0 10px var(--mc-emerald); animation: mc-pulse 2s ease-in-out infinite; }
+.mc-dot-warn  { background: var(--mc-amber);   box-shadow: 0 0 10px var(--mc-amber); }
+.mc-dot-off   { background: var(--mc-text-mute); }
+.mc-dot-busy  { background: var(--mc-cyan);    box-shadow: 0 0 10px var(--mc-cyan); animation: mc-pulse 1.2s ease-in-out infinite; }
+
+@keyframes mc-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.85); }
+}
+
+/* Radar */
+@keyframes mc-radar-sweep {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.mc-radar-sweep {
+  animation: mc-radar-sweep 6s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes mc-ring-pulse {
+  0%   { r: 6; opacity: 0.9; }
+  100% { r: 22; opacity: 0; }
+}
+.mc-ping circle:nth-child(2) {
+  animation: mc-ring-pulse 2.4s ease-out infinite;
+}
+
+/* Glyph float */
+@keyframes mc-glyph-float {
+  0%, 100% { transform: translateY(0); opacity: 0.4; }
+  50%      { transform: translateY(-6px); opacity: 0.7; }
+}
+.mc-float { animation: mc-glyph-float 5s ease-in-out infinite; }
+
+/* Slow pulse */
+@keyframes mc-slow-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
+.mc-slow-pulse { animation: mc-slow-pulse 3s ease-in-out infinite; }
+
+/* Flicker */
+@keyframes mc-flicker {
+  0%, 100% { opacity: 1; }
+  47%      { opacity: 1; }
+  48%      { opacity: 0.55; }
+  49%      { opacity: 1; }
+  78%      { opacity: 0.7; }
+  79%      { opacity: 1; }
+}
+.mc-flicker { animation: mc-flicker 7s linear infinite; }
+
+/* Data flow line */
+@keyframes mc-flow {
+  0%   { stroke-dashoffset: 60; }
+  100% { stroke-dashoffset: 0; }
+}
+.mc-flow-line {
+  stroke-dasharray: 4 6;
+  animation: mc-flow 1.4s linear infinite;
+}
+
+/* Slide-in for feed */
+@keyframes mc-slide-in {
+  0%   { transform: translateX(20px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+.mc-slide-in { animation: mc-slide-in 0.4s ease-out both; }
+
+/* Bar fill animation */
+@keyframes mc-bar-grow {
+  0%   { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
+.mc-bar-grow {
+  transform-origin: left center;
+  animation: mc-bar-grow 0.8s ease-out both;
+}
+
+/* Hover glow */
+.mc-hover-glow {
+  transition: box-shadow 200ms ease, border-color 200ms ease, transform 200ms ease;
+}
+.mc-hover-glow:hover {
+  box-shadow: 0 0 24px rgba(0, 212, 255, 0.35), inset 0 0 20px rgba(0, 212, 255, 0.06);
+  border-color: rgba(0, 212, 255, 0.55);
+}
+
+/* Scrollbar override inside HUD */
+.mc-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.mc-scroll::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.25); border-radius: 999px; }
+.mc-scroll::-webkit-scrollbar-track { background: transparent; }
