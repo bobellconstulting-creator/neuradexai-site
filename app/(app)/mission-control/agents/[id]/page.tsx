@@ -9,6 +9,7 @@ import { useMissionBridge } from '@/lib/useMissionBridge'
 import { CommunalChat } from '@/components/mission-control/CommunalChat'
 import { TopBar } from '@/components/mission-control/TopBar'
 import { BottomBar } from '@/components/mission-control/BottomBar'
+import { officeChannel } from '@/lib/missionChannels'
 
 interface AgentProfile {
   ok:    boolean
@@ -217,12 +218,13 @@ export default function AgentProfilePage() {
               )}
             </section>
 
-            {/* CENTER: direct chat */}
+            {/* CENTER: private office chat */}
             <section className="col-span-6 flex flex-col min-h-0">
               <CommunalChat
-                agentId={agent.id}
-                title={`DIRECT CHANNEL · ${agent.label}`}
-                placeholder={`Message ${agent.displayName} directly. Use @mentions to loop others.`}
+                channel={officeChannel(agent.id)}
+                title={`${agent.label}'S OFFICE · PRIVATE`}
+                placeholder={`${agent.displayName}'s private office. Nothing said here reaches the team unless you SHARE it.`}
+                allowShare={true}
               />
             </section>
 

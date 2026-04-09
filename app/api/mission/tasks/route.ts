@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createTask, listTasks, readTasksFile, updateTask, type MissionTask, type TaskPriority } from '@/lib/missionTasks'
 import { appendMessage, listMessages } from '@/lib/missionStream'
+import { officeChannel, type MissionMessage } from '@/lib/missionChannels'
 import { dispatchAgent } from '@/lib/agentDispatch'
 import { AGENTS, getAgent } from '@/lib/agents'
 
@@ -31,20 +32,19 @@ async function runAgentOnTask(taskId: string, agentId: string, taskBrief: string
 
     // Inject a synthetic brief into the history so the agent sees the task directly
     const briefMessage = `TASK BRIEF (from Bo, task ${taskId}):\n${taskBrief}\n\nRespond with ONE of: (a) the final result plus a URL/path/quote as proof, (b) "BLOCKED: <exact reason>", or (c) "DONE: <one-line summary>" if no artifact is needed. Do not narrate. Do not ask clarifying questions.`
-    const augmented = [
-      ...history,
-      {
-        id:         `brief-${taskId}`,
-        ts:         Date.now(),
-        agentId:    'bo',
-        role:       'user' as const,
-        content:    briefMessage,
-        mentions:   [agentId],
-        replyTo:    null,
-        status:     'done' as const,
-        visibility: 'communal' as const,
-      },
-    ]
+    const syntheticBrief: MissionMessage = {
+      id:         `brief-${taskId}`,
+      ts:         Date.now(),
+      agentId:    'bo',
+      role:       'user',
+      content:    briefMessage,
+      mentions:   [agentId],
+      replyTo:    null,
+      status:     'done',
+      visibility: 'private',
+      channel:    officeChannel(agentId),
+    }
+    const augmented: MissionMessage[] = [...history, syntheticBrief]
 
     const reply = await dispatchAgent(agentId, augmented)
     const trimmed = reply.trim()

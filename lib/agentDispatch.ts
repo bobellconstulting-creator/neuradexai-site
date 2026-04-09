@@ -18,6 +18,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { AGENTS, getAgent, type AgentConfig } from '@/lib/agents'
 import type { MissionMessage } from '@/lib/missionStream'
+import { BOARDROOM, officeChannel } from '@/lib/missionStream'
 
 // ─── Rich persona loader ────────────────────────────────────────────────────
 // For agents whose full SOUL.md is checked into the repo at lib/personas/,
@@ -98,9 +99,24 @@ function renderHistory(history: MissionMessage[]): string {
       const who = m.agentId === 'bo' ? 'Bo' : getAgent(m.agentId)?.displayName ?? m.agentId
       const body = m.content || '(pending)'
       const mentionTag = m.mentions.length > 0 ? ` [→ ${m.mentions.map((id) => `@${id}`).join(' ')}]` : ''
-      return `${who}${mentionTag}: ${body}`
+      const channelTag =
+        m.channel === BOARDROOM            ? ' [boardroom]' :
+        m.sharedFrom                       ? ` [shared by ${m.sharedFrom.by} from ${m.sharedFrom.channel}]` :
+                                             ''
+      return `${who}${mentionTag}${channelTag}: ${body}`
     })
     .join('\n')
+}
+
+/**
+ * Scope history to what THIS agent is allowed to see:
+ *   - their own office channel
+ *   - the boardroom (communal, opt-in)
+ * That's it. Other agents' offices are walled off.
+ */
+export function scopeHistoryForAgent(all: MissionMessage[], agentId: string): MissionMessage[] {
+  const office = officeChannel(agentId)
+  return all.filter((m) => m.channel === office || m.channel === BOARDROOM)
 }
 
 async function dispatchGemini(agent: AgentConfig, history: MissionMessage[]): Promise<string> {
@@ -217,6 +233,11 @@ export async function dispatchAgent(
 ): Promise<string> {
   const agent = getAgent(agentId)
   if (!agent) throw new Error(`unknown agent: ${agentId}`)
+
+  // CRITICAL: scope history so this agent ONLY sees their office + boardroom.
+  // Any leak here breaks the offices model — do not remove this filter.
+  const scoped = scopeHistoryForAgent(history, agentId)
+  history = scoped
 
   // Dedicated path for the 'claude' agent — always Sonnet 4.6
   if (agent.provider === 'anthropic') {

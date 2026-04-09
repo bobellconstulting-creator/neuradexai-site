@@ -3,12 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AGENTS, getAgent } from '@/lib/agents'
 import { useMissionStream } from '@/lib/useMissionStream'
-import type { MissionMessage } from '@/lib/missionStream'
+import { BOARDROOM, officeChannel, type ChannelId, type MissionMessage } from '@/lib/missionChannels'
 
 interface CommunalChatProps {
-  agentId?: string           // filter to one agent's thread
+  agentId?: string           // legacy — filter to one agent (fallback)
+  channel?: ChannelId        // NEW: explicit channel (e.g. "office:bob")
   title?:   string
   placeholder?: string
+  /** Show the SHARE button so messages can be promoted out of this channel */
+  allowShare?: boolean
 }
 
 function formatTime(ts: number): string {
@@ -23,11 +26,18 @@ function authorOf(msg: MissionMessage): { label: string; color: string } {
   return { label: msg.agentId.toUpperCase(), color: '#8aa0b8' }
 }
 
-export function CommunalChat({ agentId, title = 'COMMS CHANNEL', placeholder }: CommunalChatProps) {
-  const { messages, loading, error, send, sending } = useMissionStream({ agentId })
+export function CommunalChat({
+  agentId,
+  channel,
+  title = 'COMMS CHANNEL',
+  placeholder,
+  allowShare = false,
+}: CommunalChatProps) {
+  const { messages, loading, error, send, sending, share } = useMissionStream({ agentId, channel })
   const [draft, setDraft] = useState('')
   const [showMention, setShowMention] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
+  const [shareOpen, setShareOpen] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to bottom on new messages
@@ -105,15 +115,67 @@ export function CommunalChat({ agentId, title = 'COMMS CHANNEL', placeholder }: 
           const author = authorOf(m)
           const isPending = m.status === 'pending'
           const isUser = m.agentId === 'bo'
+          const isShared = !!m.sharedFrom
           return (
             <div
               key={m.id}
-              className={`mc-slide-in flex items-start gap-3 px-2 py-1.5 rounded border ${
+              className={`mc-slide-in relative flex items-start gap-3 px-2 py-1.5 rounded border group ${
                 isUser
                   ? 'border-[rgba(0,212,255,0.25)] bg-[rgba(0,212,255,0.04)]'
+                  : isShared
+                  ? 'border-[rgba(245,158,11,0.25)] bg-[rgba(245,158,11,0.03)]'
                   : 'border-transparent hover:border-[var(--mc-border)]'
               }`}
             >
+              {isShared && m.sharedFrom && (
+                <div className="absolute -top-2 right-3 mc-mono text-[8px] tracking-widest text-[#f59e0b] bg-[#1e2122] px-1.5">
+                  ↑ SHARED FROM {m.sharedFrom.channel.toUpperCase()}
+                </div>
+              )}
+              {allowShare && !isPending && m.content && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setShareOpen((prev) => (prev === m.id ? null : m.id))
+                  }}
+                  className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 mc-mono text-[9px] tracking-widest px-1.5 py-0.5 rounded border border-[var(--mc-border)] text-[var(--mc-text-mute)] hover:text-[#f59e0b] hover:border-[#f59e0b] transition-all"
+                >
+                  SHARE
+                </button>
+              )}
+              {shareOpen === m.id && (
+                <div className="absolute top-7 right-2 z-30 mc-panel mc-corners p-2 min-w-[200px]">
+                  <div className="mc-label text-[9px] mb-1">SHARE TO</div>
+                  <button
+                    onClick={async () => {
+                      await share(m.id, [BOARDROOM])
+                      setShareOpen(null)
+                    }}
+                    className="w-full text-left px-2 py-1 mc-mono text-[10px] hover:bg-[rgba(245,158,11,0.10)] text-[#f59e0b]"
+                  >
+                    → BOARDROOM (all agents)
+                  </button>
+                  {AGENTS.filter((a) => a.id !== m.agentId).slice(0, 5).map((a) => (
+                    <button
+                      key={a.id}
+                      onClick={async () => {
+                        await share(m.id, [officeChannel(a.id)])
+                        setShareOpen(null)
+                      }}
+                      className="w-full text-left px-2 py-1 mc-mono text-[10px] hover:bg-[rgba(0,212,255,0.10)]"
+                      style={{ color: a.color }}
+                    >
+                      → @{a.label}&apos;s OFFICE
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setShareOpen(null)}
+                    className="w-full text-left px-2 py-1 mc-mono text-[9px] text-[var(--mc-text-mute)] border-t border-[var(--mc-border)] mt-1 pt-1"
+                  >
+                    cancel
+                  </button>
+                </div>
+              )}
               <div className="shrink-0 flex flex-col items-center w-16">
                 <span
                   className="mc-mono text-[10px] tracking-[0.22em] font-semibold"
