@@ -35,7 +35,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const VALID_IDS = AGENTS.map((a) => a.id)
-const ROUTER_FALLBACK = 'atlas'
+const ROUTER_FALLBACK = 'jarvis'
 
 async function runAgentTurn(
   agentId: string,
@@ -46,7 +46,7 @@ async function runAgentTurn(
   try {
     // Scoped history — dispatcher will further scope to office+boardroom
     const history = await listMessages({ limit: 200 })
-    const reply = await dispatchAgent(agentId, history)
+    const { content: reply, toolCalls } = await dispatchAgent(agentId, history)
 
     if (reply.trim().toUpperCase() === 'SILENCE' || !reply.trim()) {
       await updateMessage(pendingId, {
@@ -62,6 +62,7 @@ async function runAgentTurn(
       content: reply,
       mentions: newMentions,
       status: 'done',
+      ...(toolCalls.length > 0 ? { toolCalls } : {}),
     })
 
     // Cross-talk: agent @mentioned a teammate. Default to boardroom for cross-talk

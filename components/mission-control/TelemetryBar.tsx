@@ -17,7 +17,7 @@ interface BarProps {
 function Bar({ label, value, unit = '%', max = 100, color = '#00d4ff' }: BarProps) {
   const pct = Math.min(100, Math.max(0, (value / max) * 100))
   return (
-    <div className="flex items-center gap-3 min-w-[180px]">
+    <div className="flex items-center gap-3 min-w-0">
       <span className="mc-label w-14 shrink-0">{label}</span>
       <div className="relative flex-1 h-1.5 bg-[rgba(0,212,255,0.08)] rounded overflow-hidden">
         <div
@@ -45,7 +45,7 @@ function fmtUptime(sec: number): string {
 
 export function TelemetryBar({ telemetry }: TelemetryBarProps) {
   return (
-    <div className="flex items-center gap-6 px-6 py-2 border-t border-[var(--mc-border)] bg-[rgba(5,7,20,0.7)] backdrop-blur-md">
+    <div className="flex items-center gap-6 px-6 py-2 border-t border-[var(--mc-border)] bg-[rgba(5,7,20,0.7)] backdrop-blur-md overflow-x-auto">
       <div className="mc-label mc-label-brass">TELEMETRY</div>
       <Bar label="CPU" value={telemetry.cpu} color="#00d4ff" />
       <Bar label="MEM" value={telemetry.memory} color="#7b5cf0" />

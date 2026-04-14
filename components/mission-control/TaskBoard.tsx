@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { getAgent, AGENTS } from '@/lib/agents'
 import { useMissionTasks } from '@/lib/useMissionTasks'
 import type { MissionTask, TaskPriority } from '@/lib/missionTasks'
@@ -29,11 +28,11 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = {
 
 function TaskRow({ task }: { task: MissionTask }) {
   const agent = task.assignedTo !== 'unassigned' ? getAgent(task.assignedTo) : undefined
-  const router = useRouter()
+  const [open, setOpen] = useState(false)
 
   return (
     <div
-      onClick={() => router.push(`/mission-control/tasks/${task.id}`)}
+      onClick={() => setOpen((v) => !v)}
       className="mc-slide-in px-2 py-1.5 rounded border cursor-pointer transition-colors"
       style={{
         borderColor: task.revenue ? 'rgba(34,197,94,0.30)' : 'rgba(0,212,255,0.12)',
@@ -80,6 +79,19 @@ function TaskRow({ task }: { task: MissionTask }) {
               </a>
             )}
           </div>
+          {open && task.agentReport && (
+            <div
+              className="mt-2 text-[10px] mc-mono whitespace-pre-wrap border-l-2 pl-2"
+              style={{ color: STATUS_COLOR[task.status], borderColor: STATUS_COLOR[task.status] }}
+            >
+              {task.agentReport}
+            </div>
+          )}
+          {open && task.blockedReason && !task.agentReport && (
+            <div className="mt-1 text-[10px] mc-mono text-[#ff6060]">
+              → {task.blockedReason}
+            </div>
+          )}
         </div>
       </div>
     </div>

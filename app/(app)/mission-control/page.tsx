@@ -10,10 +10,11 @@ import { BottomBar } from '@/components/mission-control/BottomBar'
 import { TaskBoard } from '@/components/mission-control/TaskBoard'
 import { RadarSweep } from '@/components/mission-control/RadarSweep'
 import { LiveFeed } from '@/components/mission-control/LiveFeed'
+import { CalendarPanel } from '@/components/mission-control/CalendarPanel'
 
 // Agents visible in the lobby. Aria lives on Bo's desktop separately;
 // Axon is part of Marcus.
-const ACTIVE_AGENT_IDS = ['jarvis', 'linda', 'marcus', 'atlas', 'claude', 'bob', 'aria']
+const ACTIVE_AGENT_IDS = ['jarvis']
 
 export default function MissionControlLobbyPage() {
   const router = useRouter()
@@ -60,27 +61,29 @@ export default function MissionControlLobbyPage() {
               <span className="mc-mono text-sm tracking-[0.22em] font-bold text-[var(--mc-cyan)]">
                 THE BUILDING
               </span>
-              <span className="mc-label">Bo&apos;s lobby · 7 offices · 1 boardroom</span>
+              <span className="mc-label">Bo&apos;s lobby · 1 active agent · 1 boardroom</span>
             </div>
-            <div className="ml-auto flex items-center gap-5">
-              <LobbyStat label="TOTAL TASKS" value={counts.total} color="#edf3ff" />
-              <LobbyStat label="ACTIVE"      value={counts.open + counts.in_progress} color="#00d4ff" />
-              <LobbyStat label="DONE"        value={counts.done}    color="#22c55e" />
-              <LobbyStat label="BLOCKED"     value={counts.blocked} color="#ff6060" />
-              <LobbyStat label="$ REVENUE"   value={counts.revenue} color="#22c55e" />
+            <div className="ml-auto flex items-center gap-3 md:gap-5">
+              <LobbyStat label="ACTIVE"    value={counts.open + counts.in_progress} color="#00d4ff" />
+              <LobbyStat label="BLOCKED"   value={counts.blocked}                   color="#ff6060" />
+              <div className="hidden sm:flex items-center gap-3 md:gap-5">
+                <LobbyStat label="TOTAL"     value={counts.total}   color="#edf3ff" />
+                <LobbyStat label="DONE"      value={counts.done}    color="#22c55e" />
+                <LobbyStat label="$ REVENUE" value={counts.revenue} color="#22c55e" />
+              </div>
             </div>
           </div>
 
           {/* Main lobby grid */}
-          <div className="flex-1 min-h-0 grid grid-cols-12 gap-3">
-            {/* LEFT: office doors */}
-            <section className="col-span-4 flex flex-col gap-3 min-h-0">
-              <div className="mc-panel mc-corners p-3 flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-3">
+            {/* LEFT: office doors + calendar */}
+            <section className="col-span-1 md:col-span-4 flex flex-col gap-3 min-h-0 order-first md:order-none">
+              <div className="mc-panel mc-corners p-3 flex-shrink-0 flex flex-col">
                 <div className="flex items-center justify-between mb-3">
                   <span className="mc-label mc-label-brass">AGENT OFFICES</span>
                   <span className="mc-label">{visibleAgents.length}</span>
                 </div>
-                <div className="grid grid-cols-1 gap-2 overflow-y-auto mc-scroll pr-1">
+                <div className="grid grid-cols-1 gap-2 overflow-y-auto mc-scroll pr-1 max-h-[260px] md:max-h-none">
                   {visibleAgents.map((a) => {
                     const stats = perAgentTasks[a.id] ?? { active: 0, done: 0, blocked: 0 }
                     return (
@@ -113,11 +116,14 @@ export default function MissionControlLobbyPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Calendar panel — below agent list on both mobile and desktop */}
+              <CalendarPanel />
             </section>
 
             {/* CENTER: radar + task board */}
-            <section className="col-span-5 flex flex-col gap-3 min-h-0">
-              <div className="relative mc-panel mc-corners flex-shrink-0 h-[300px] flex items-center justify-center overflow-hidden">
+            <section className="col-span-1 md:col-span-5 flex flex-col-reverse md:flex-col gap-3 min-h-0 order-3 md:order-none">
+              <div className="relative mc-panel mc-corners flex-shrink-0 h-[180px] md:h-[300px] flex items-center justify-center overflow-hidden">
                 <div className="absolute top-3 left-4 flex items-center gap-3">
                   <span className="mc-label mc-label-brass">PRIMARY SCOPE</span>
                 </div>
@@ -138,7 +144,7 @@ export default function MissionControlLobbyPage() {
             </section>
 
             {/* RIGHT: live feed */}
-            <section className="col-span-3 flex flex-col min-h-0">
+            <section className="col-span-1 md:col-span-3 flex flex-col min-h-0 order-2 md:order-none">
               <LiveFeed events={events} />
             </section>
           </div>
@@ -190,7 +196,7 @@ function OfficeDoor({ agent, activeCount, doneCount, blockedCount, onClick }: Of
   return (
     <button
       onClick={onClick}
-      className="flex items-center gap-3 p-3 rounded border transition-all text-left group"
+      className="flex items-center gap-3 p-3 min-h-[44px] rounded border transition-all text-left group"
       style={{
         borderColor: `${agent.color}25`,
         background: `${agent.color}06`,

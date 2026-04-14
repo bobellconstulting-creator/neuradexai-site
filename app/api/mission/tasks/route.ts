@@ -46,7 +46,7 @@ async function runAgentOnTask(taskId: string, agentId: string, taskBrief: string
     }
     const augmented: MissionMessage[] = [...history, syntheticBrief]
 
-    const reply = await dispatchAgent(agentId, augmented)
+    const { content: reply } = await dispatchAgent(agentId, augmented)
     const trimmed = reply.trim()
 
     // Parse intent from the reply

@@ -1,15 +1,25 @@
 'use client'
 
+import dynamic from 'next/dynamic'
 import { notFound, useParams, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AgentConfig } from '@/lib/agents'
 import type { MissionTask, TaskPriority } from '@/lib/missionTasks'
 import type { MissionMessage } from '@/lib/missionStream'
+import type { GraphData, GraphNode } from '@/types/agent-graph'
 import { useMissionBridge } from '@/lib/useMissionBridge'
-import { CommunalChat } from '@/components/mission-control/CommunalChat'
 import { TopBar } from '@/components/mission-control/TopBar'
 import { BottomBar } from '@/components/mission-control/BottomBar'
-import { officeChannel } from '@/lib/missionChannels'
+import { NodeDetailCard } from '@/components/mission-control/AgentRoom/NodeDetailCard'
+import { VoiceChat } from '@/components/mission-control/VoiceChat'
+
+// WebGL — must not run on the server
+const AgentRoomScene = dynamic(
+  () => import('@/components/mission-control/AgentRoom/AgentRoomScene'),
+  { ssr: false, loading: () => <ConstellationSkeleton /> },
+)
+
+// ── Types ─────────────────────────────────────────────────────────────────
 
 interface AgentProfile {
   ok:    boolean
@@ -54,27 +64,40 @@ function ageStr(ts: number | null): string {
   return `${d}d ago`
 }
 
+// ── Page ──────────────────────────────────────────────────────────────────
+
+type AgentTab = 'graph' | 'chat'
+
 export default function AgentProfilePage() {
-  const params = useParams<{ id: string }>()
-  const router = useRouter()
+  const params  = useParams<{ id: string }>()
+  const router  = useRouter()
   const { telemetry, connected, agents } = useMissionBridge()
 
-  const [profile, setProfile] = useState<AgentProfile | null>(null)
-  const [loading, setLoading] = useState<boolean>(true)
+  // Active tab
+  const [tab, setTab] = useState<AgentTab>('chat')
+
+  // Agent profile (tasks, soul, stats)
+  const [profile, setProfile]           = useState<AgentProfile | null>(null)
+  const [loading, setLoading]           = useState<boolean>(true)
   const [notFoundFlag, setNotFoundFlag] = useState<boolean>(false)
+
+  // Constellation state
+  const [graph, setGraph]               = useState<GraphData | null>(null)
+  const [graphError, setGraphError]     = useState<boolean>(false)
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
+
+  // ── Fetch profile ──────────────────────────────────────────────────────
 
   const fetchProfile = useCallback(async () => {
     try {
       const res = await fetch(`/api/mission/agents/${params.id}`, { cache: 'no-store' })
-      if (res.status === 404) {
-        setNotFoundFlag(true)
-        return
-      }
+      if (res.status === 404) { setNotFoundFlag(true); return }
       if (!res.ok) throw new Error(`profile ${res.status}`)
       const data = (await res.json()) as AgentProfile
       setProfile(data)
     } catch {
-      // swallow — the UI shows a loading/error state
+      // UI shows loading/error state
     } finally {
       setLoading(false)
     }
@@ -85,6 +108,39 @@ export default function AgentProfilePage() {
     const t = setInterval(fetchProfile, 3000)
     return () => clearInterval(t)
   }, [fetchProfile])
+
+  // ── Fetch graph ────────────────────────────────────────────────────────
+
+  const fetchGraph = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/mission/agents/${params.id}/graph`, { cache: 'no-store' })
+      if (!res.ok) { setGraphError(true); return }
+      const data = (await res.json()) as GraphData
+      setGraph(data)
+    } catch {
+      setGraphError(true)
+    }
+  }, [params.id])
+
+  useEffect(() => {
+    fetchGraph()
+  }, [fetchGraph])
+
+  // ── Node selection ─────────────────────────────────────────────────────
+
+  const handleSelectNode = useCallback((node: GraphNode | null) => {
+    setSelectedNode(node)
+    setFocusedNodeId(node?.id ?? null)
+  }, [])
+
+  const handleCloseDetail = useCallback(() => {
+    setSelectedNode(null)
+    setFocusedNodeId(null)
+  }, [])
+
+  // Dismiss detail on Escape is handled inside NodeDetailCard itself
+
+  // ── Guards ─────────────────────────────────────────────────────────────
 
   if (notFoundFlag) notFound()
 
@@ -99,13 +155,13 @@ export default function AgentProfilePage() {
     )
   }
 
-  const { agent, soul, stats, tasks, messages } = profile
-  const bridgeAgent = agents.find((a) => a.id === agent.id)
-  const statusDot =
-    bridgeAgent?.status === 'online'  ? 'mc-dot-on'   :
-    bridgeAgent?.status === 'busy'    ? 'mc-dot-busy' :
-    bridgeAgent?.status === 'idle'    ? 'mc-dot-warn' :
-                                        'mc-dot-off'
+  const { agent, tasks } = profile
+  const bridgeAgent  = agents.find((a) => a.id === agent.id)
+  const statusDot    =
+    bridgeAgent?.status === 'online' ? 'mc-dot-on'   :
+    bridgeAgent?.status === 'busy'   ? 'mc-dot-busy' :
+    bridgeAgent?.status === 'idle'   ? 'mc-dot-warn' :
+                                       'mc-dot-off'
 
   return (
     <div className="mc-root">
@@ -117,11 +173,12 @@ export default function AgentProfilePage() {
         <TopBar bridgeUp={connected || telemetry.bridgeUp} />
 
         <div className="flex-1 flex flex-col min-h-0 p-4 gap-3 overflow-hidden">
+
           {/* Identity strip */}
-          <div className="mc-panel mc-corners px-4 py-3 flex items-center gap-4 flex-shrink-0">
+          <div className="mc-panel mc-corners px-4 py-3 flex items-center gap-4 flex-shrink-0 flex-wrap gap-y-2">
             <button
               onClick={() => router.push('/mission-control')}
-              className="mc-mono text-[11px] tracking-widest px-3 py-1 border border-[var(--mc-border)] text-sand-dim hover:text-[var(--mc-cyan)] hover:border-[var(--mc-cyan)] rounded"
+              className="mc-mono text-[11px] tracking-widest px-3 py-1 min-h-[44px] border border-[var(--mc-border)] text-sand-dim hover:text-[var(--mc-cyan)] hover:border-[var(--mc-cyan)] rounded"
             >
               ← FLEET
             </button>
@@ -137,148 +194,163 @@ export default function AgentProfilePage() {
               </span>
               <span className="mc-label">{agent.title}</span>
             </div>
-            <div className="ml-auto flex items-center gap-4">
-              <span className="mc-label">MODEL · {agent.model}</span>
-              {agent.port && <span className="mc-label mc-label-brass">:{agent.port}</span>}
-              {agent.telegram && <span className="mc-label">{agent.telegram}</span>}
+            <div className="ml-auto flex items-center gap-3 flex-wrap">
+              <span className="mc-label hidden sm:inline">MODEL · {agent.model}</span>
+              {agent.port && <span className="mc-label mc-label-brass hidden sm:inline">:{agent.port}</span>}
               <span className={`mc-dot ${statusDot}`} />
-              <span className="mc-label">{(bridgeAgent?.status ?? 'unknown').toUpperCase()}</span>
+              {/* Tab switcher */}
+              <div className="flex items-center gap-1 bg-[rgba(5,7,20,0.55)] border border-[var(--mc-border)] rounded p-0.5">
+                <button
+                  onClick={() => setTab('chat')}
+                  className={`mc-mono text-[10px] tracking-widest px-3 py-1.5 rounded transition-all ${
+                    tab === 'chat'
+                      ? 'bg-[rgba(0,212,255,0.15)] text-[var(--mc-cyan)] border border-[var(--mc-cyan)]'
+                      : 'text-[var(--mc-text-mute)] hover:text-sand'
+                  }`}
+                >
+                  CHAT
+                </button>
+                <button
+                  onClick={() => setTab('graph')}
+                  className={`mc-mono text-[10px] tracking-widest px-3 py-1.5 rounded transition-all ${
+                    tab === 'graph'
+                      ? 'bg-[rgba(0,212,255,0.15)] text-[var(--mc-cyan)] border border-[var(--mc-cyan)]'
+                      : 'text-[var(--mc-text-mute)] hover:text-sand'
+                  }`}
+                >
+                  GRAPH
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Main 3-col grid */}
-          <div className="flex-1 min-h-0 grid grid-cols-12 gap-3">
-            {/* LEFT: identity + stats + persona */}
-            <section className="col-span-3 flex flex-col gap-3 min-h-0 overflow-y-auto mc-scroll pr-1">
-              {/* Stats tiles */}
-              <div className="mc-panel mc-corners p-3">
-                <div className="mc-label mc-label-brass mb-2">PERFORMANCE</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <StatTile label="TOTAL"      value={stats.total}       color="#edf3ff" />
-                  <StatTile label="DONE"       value={stats.done}        color="#22c55e" />
-                  <StatTile label="ACTIVE"     value={stats.in_progress} color="#00d4ff" />
-                  <StatTile label="OPEN"       value={stats.open}        color="#efb356" />
-                  <StatTile label="BLOCKED"    value={stats.blocked}     color="#ff6060" />
-                  <StatTile label="$ REVENUE"  value={stats.revenue}     color="#22c55e" />
+          {/* Main content — switches between chat tab and graph+tasks tab */}
+          {tab === 'chat' ? (
+            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-3">
+              <section className="col-span-1 md:col-span-9 mc-panel mc-corners flex flex-col min-h-0">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--mc-border)]">
+                  <span className="mc-label mc-label-brass">{agent.label} · DIRECT LINE</span>
+                  <span className="mc-label text-[var(--mc-cyan)]">VOICE ENABLED</span>
                 </div>
-                {stats.successRate !== null && (
-                  <div className="mt-3 pt-2 border-t border-[var(--mc-border)] flex items-center justify-between">
-                    <span className="mc-label">SUCCESS RATE</span>
-                    <span className="mc-mono text-lg font-bold" style={{ color: '#22c55e' }}>
-                      {stats.successRate}%
+                <VoiceChat
+                  agentId={agent.id}
+                  agentColor={agent.color}
+                  agentLabel={agent.label}
+                  channel={`office:${agent.id}`}
+                />
+              </section>
+              <section className="col-span-1 md:col-span-3 flex flex-col gap-3 min-h-0">
+                <AgentTaskPanel agent={agent} tasks={tasks} onRefresh={fetchProfile} />
+              </section>
+            </div>
+          ) : (
+            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-3 overflow-y-auto md:overflow-hidden pb-[140px] md:pb-0">
+              {/* LEFT/CENTER: 3D constellation canvas */}
+              <section className="col-span-1 md:col-span-9 h-[280px] md:h-auto min-h-0 relative mc-panel mc-corners overflow-hidden flex-shrink-0">
+                {graph && !graphError ? (
+                  <AgentRoomScene
+                    graph={graph}
+                    focusedNodeId={focusedNodeId}
+                    onSelectNode={handleSelectNode}
+                    agentAccentColor={agent.color}
+                    className="w-full h-full"
+                  />
+                ) : graphError ? (
+                  <ConstellationErrorFallback agentLabel={agent.label} onRetry={fetchGraph} />
+                ) : (
+                  <ConstellationSkeleton />
+                )}
+                <div className="absolute top-2 left-3 pointer-events-none">
+                  <span className="mc-label mc-label-brass text-[9px]">
+                    {agent.label} · KNOWLEDGE GRAPH
+                  </span>
+                </div>
+                {!selectedNode && graph && !graphError && (
+                  <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
+                    <span className="mc-label text-[var(--mc-text-mute)] text-[9px]">
+                      CLICK A NODE TO INSPECT
                     </span>
                   </div>
                 )}
-                <div className="mt-2 pt-2 border-t border-[var(--mc-border)] flex items-center justify-between">
-                  <span className="mc-label">LAST ACTIVE</span>
-                  <span className="mc-mono text-[10px] text-sand">
-                    {ageStr(stats.lastActive)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Persona — Who I Am */}
-              {(soul.whoIAm || agent.description) && (
-                <div className="mc-panel mc-corners p-3">
-                  <div className="mc-label mc-label-brass mb-2">IDENTITY</div>
-                  <div className="text-[11px] text-sand mc-mono leading-relaxed whitespace-pre-wrap">
-                    {soul.whoIAm ?? agent.description}
-                  </div>
-                </div>
-              )}
-
-              {/* Voice */}
-              {soul.voice && (
-                <div className="mc-panel mc-corners p-3">
-                  <div className="mc-label mc-label-brass mb-2">VOICE</div>
-                  <div className="text-[11px] text-sand-dim mc-mono leading-relaxed whitespace-pre-wrap">
-                    {soul.voice}
-                  </div>
-                </div>
-              )}
-
-              {/* Tools */}
-              {soul.tools && (
-                <div className="mc-panel mc-corners p-3">
-                  <div className="mc-label mc-label-brass mb-2">TOOLS</div>
-                  <div className="text-[10px] text-sand-dim mc-mono leading-relaxed whitespace-pre-wrap">
-                    {soul.tools}
-                  </div>
-                </div>
-              )}
-
-              {/* Hard Rules */}
-              {soul.hardRules && (
-                <div className="mc-panel mc-corners p-3">
-                  <div className="mc-label mc-label-brass mb-2">HARD RULES</div>
-                  <div className="text-[10px] text-sand-dim mc-mono leading-relaxed whitespace-pre-wrap">
-                    {soul.hardRules}
-                  </div>
-                </div>
-              )}
-            </section>
-
-            {/* CENTER: private office chat */}
-            <section className="col-span-6 flex flex-col min-h-0">
-              <CommunalChat
-                channel={officeChannel(agent.id)}
-                title={`${agent.label}'S OFFICE · PRIVATE`}
-                placeholder={`${agent.displayName}'s private office. Nothing said here reaches the team unless you SHARE it.`}
-                allowShare={true}
-              />
-            </section>
-
-            {/* RIGHT: task board for this agent + quick drop */}
-            <section className="col-span-3 flex flex-col gap-3 min-h-0">
-              <AgentTaskPanel agent={agent} tasks={tasks} onRefresh={fetchProfile} />
-            </section>
-          </div>
+              </section>
+              {/* RIGHT: task panel */}
+              <section className="col-span-1 md:col-span-3 flex flex-col gap-3 min-h-0">
+                <AgentTaskPanel agent={agent} tasks={tasks} onRefresh={fetchProfile} />
+              </section>
+            </div>
+          )}
         </div>
 
         <BottomBar telemetry={telemetry} />
       </div>
+
+      {/* Node detail card — overlays the constellation on both mobile & desktop */}
+      {selectedNode && (
+        <NodeDetailCard
+          node={selectedNode}
+          agent={agent}
+          onClose={handleCloseDetail}
+        />
+      )}
     </div>
   )
 }
 
-// ─── Subcomponents ────────────────────────────────────────────────────────────
+// ── Skeleton / fallback ────────────────────────────────────────────────────
 
-function StatTile({ label, value, color }: { label: string; value: number; color: string }) {
+function ConstellationSkeleton() {
   return (
-    <div
-      className="flex flex-col items-center justify-center rounded py-2 border"
-      style={{
-        borderColor: `${color}30`,
-        background: `${color}08`,
-      }}
-    >
-      <span className="mc-mono text-xl font-bold" style={{ color }}>
-        {value.toString().padStart(2, '0')}
+    <div className="w-full h-full flex items-center justify-center">
+      <span className="mc-label text-[var(--mc-text-mute)] animate-pulse">
+        LOADING CONSTELLATION…
       </span>
-      <span className="mc-label text-[9px]">{label}</span>
     </div>
   )
 }
+
+function ConstellationErrorFallback({
+  agentLabel,
+  onRetry,
+}: {
+  agentLabel: string
+  onRetry: () => void
+}) {
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center gap-3">
+      <span className="mc-label text-[#ff6060]">
+        GRAPH UNAVAILABLE FOR {agentLabel}
+      </span>
+      <button
+        onClick={onRetry}
+        className="mc-mono text-[10px] tracking-widest px-3 py-1 border border-[var(--mc-border)] text-sand-dim hover:text-[var(--mc-cyan)] hover:border-[var(--mc-cyan)] rounded"
+      >
+        RETRY
+      </button>
+    </div>
+  )
+}
+
+// ── AgentTaskPanel ─────────────────────────────────────────────────────────
 
 function AgentTaskPanel({
   agent,
   tasks,
   onRefresh,
 }: {
-  agent: AgentConfig
-  tasks: MissionTask[]
+  agent:     AgentConfig
+  tasks:     MissionTask[]
   onRefresh: () => void
 }) {
-  const [title, setTitle] = useState('')
-  const [priority, setPriority] = useState<TaskPriority>('high')
-  const [revenue, setRevenue] = useState<boolean>(true)
+  const [title,      setTitle]      = useState('')
+  const [priority,   setPriority]   = useState<TaskPriority>('high')
+  const [revenue,    setRevenue]    = useState<boolean>(true)
   const [submitting, setSubmitting] = useState(false)
 
   const grouped = useMemo(
     () => ({
-      active:   tasks.filter((t) => t.status === 'in_progress' || t.status === 'open'),
-      blocked:  tasks.filter((t) => t.status === 'blocked'),
-      done:     tasks.filter((t) => t.status === 'done').slice(0, 10),
+      active:  tasks.filter((t) => t.status === 'in_progress' || t.status === 'open'),
+      blocked: tasks.filter((t) => t.status === 'blocked'),
+      done:    tasks.filter((t) => t.status === 'done').slice(0, 10),
     }),
     [tasks],
   )
@@ -316,9 +388,7 @@ function AgentTaskPanel({
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleDrop()
-          }}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleDrop() }}
           placeholder={`Drop a task for ${agent.displayName}…`}
           className="w-full bg-[rgba(5,7,20,0.55)] border border-[var(--mc-border)] rounded px-2 py-1 mc-mono text-[11px] text-sand placeholder:text-[var(--mc-text-mute)] focus:outline-none focus:border-[var(--mc-cyan)]"
         />
@@ -346,10 +416,7 @@ function AgentTaskPanel({
             onClick={handleDrop}
             disabled={submitting || !title.trim()}
             className="ml-auto mc-mono text-[10px] tracking-widest px-2.5 py-1 border rounded disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{
-              borderColor: agent.color,
-              color: agent.color,
-            }}
+            style={{ borderColor: agent.color, color: agent.color }}
           >
             {submitting ? '…' : 'DROP'}
           </button>
@@ -358,21 +425,23 @@ function AgentTaskPanel({
 
       {/* Task list */}
       <div className="flex-1 min-h-0 overflow-y-auto mc-scroll px-3 py-2 space-y-3">
-        <TaskSection label="ACTIVE"   items={grouped.active}  emptyMsg="NO ACTIVE TASKS" />
-        <TaskSection label="BLOCKED"  items={grouped.blocked} emptyMsg={null} />
-        <TaskSection label="DONE · 10" items={grouped.done}   emptyMsg={null} />
+        <TaskSection label="ACTIVE"    items={grouped.active}  emptyMsg="NO ACTIVE TASKS" />
+        <TaskSection label="BLOCKED"   items={grouped.blocked} emptyMsg={null} />
+        <TaskSection label="DONE · 10" items={grouped.done}    emptyMsg={null} />
       </div>
     </div>
   )
 }
+
+// ── Task sub-components ────────────────────────────────────────────────────
 
 function TaskSection({
   label,
   items,
   emptyMsg,
 }: {
-  label: string
-  items: MissionTask[]
+  label:    string
+  items:    MissionTask[]
   emptyMsg: string | null
 }) {
   if (items.length === 0 && !emptyMsg) return null
@@ -400,7 +469,7 @@ function AgentTaskRow({ task }: { task: MissionTask }) {
       className="px-2 py-1.5 rounded border cursor-pointer"
       style={{
         borderColor: task.revenue ? 'rgba(34,197,94,0.30)' : 'rgba(0,212,255,0.12)',
-        background: task.revenue ? 'rgba(34,197,94,0.04)' : 'rgba(0,212,255,0.02)',
+        background:  task.revenue ? 'rgba(34,197,94,0.04)'  : 'rgba(0,212,255,0.02)',
       }}
     >
       <div className="flex items-start gap-2">
@@ -418,7 +487,10 @@ function AgentTaskRow({ task }: { task: MissionTask }) {
           {open && task.agentReport && (
             <div
               className="mt-2 text-[10px] mc-mono whitespace-pre-wrap border-l-2 pl-2"
-              style={{ color: STATUS_COLOR[task.status], borderColor: STATUS_COLOR[task.status] }}
+              style={{
+                color:       STATUS_COLOR[task.status],
+                borderColor: STATUS_COLOR[task.status],
+              }}
             >
               {task.agentReport}
             </div>

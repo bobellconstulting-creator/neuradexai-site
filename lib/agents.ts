@@ -41,6 +41,8 @@ export interface AgentConfig {
   /** Lighter accent for highlights */
   accent:      string
   icon:        string
+  /** 'active' (default) or 'dormant' — dormant agents are parked and receive no dispatch */
+  status?:     'active' | 'dormant'
 }
 
 export const AGENTS: AgentConfig[] = [
@@ -77,6 +79,7 @@ export const AGENTS: AgentConfig[] = [
     bgColor:     'rgba(167, 139, 250, 0.06)',
     accent:      'rgba(167, 139, 250, 0.35)',
     icon:        '◈',
+    status:      'dormant',
   },
   {
     id:          'marcus',
@@ -94,6 +97,7 @@ export const AGENTS: AgentConfig[] = [
     bgColor:     'rgba(34, 197, 94, 0.06)',
     accent:      'rgba(34, 197, 94, 0.35)',
     icon:        '⚙',
+    status:      'dormant',
   },
   {
     id:          'atlas',
@@ -111,6 +115,7 @@ export const AGENTS: AgentConfig[] = [
     bgColor:     'rgba(245, 158, 11, 0.06)',
     accent:      'rgba(245, 158, 11, 0.35)',
     icon:        '◎',
+    status:      'dormant',
   },
   {
     id:          'claude',
@@ -145,6 +150,7 @@ export const AGENTS: AgentConfig[] = [
     bgColor:     'rgba(6, 182, 212, 0.06)',
     accent:      'rgba(6, 182, 212, 0.35)',
     icon:        '▲',
+    status:      'dormant',
   },
   {
     id:          'aria',
@@ -162,6 +168,7 @@ export const AGENTS: AgentConfig[] = [
     bgColor:     'rgba(236, 72, 153, 0.06)',
     accent:      'rgba(236, 72, 153, 0.35)',
     icon:        '◆',
+    status:      'dormant',
   },
 ]
 
