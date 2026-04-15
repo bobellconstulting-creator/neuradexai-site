@@ -17,6 +17,7 @@ import { reflect } from '@/lib/jarvis/reflector'
 import {
   appendDaily,
   updateBoProfile,
+  updateCognitivePatterns,
   promoteInstinct,
 } from '@/lib/jarvis/vault'
 import { invalidateMemoryCache } from '@/lib/jarvis/context-injector'
@@ -27,6 +28,7 @@ import type {
   Mistake,
   OpenQuestion,
   ProfileDelta,
+  CognitivePattern,
 } from '@/lib/jarvis/types'
 
 export const runtime = 'nodejs'
@@ -46,6 +48,7 @@ function toInstincts(r: {
   decisions: Decision[]
   mistakes: Mistake[]
   openQuestions: OpenQuestion[]
+  cognitivePatterns: CognitivePattern[]
 }): Instinct[] {
   const out: Instinct[] = []
 
@@ -131,7 +134,7 @@ export async function POST(request: NextRequest) {
   const summaryEntry = [
     sessionId ? `Session: ${sessionId}` : null,
     result.summary ? `Summary: ${result.summary}` : null,
-    `Extracted: ${result.facts.length} facts, ${result.preferences.length} prefs, ${result.decisions.length} decisions, ${result.mistakes.length} mistakes, ${result.openQuestions.length} open Qs`,
+    `Extracted: ${result.facts.length} facts, ${result.preferences.length} prefs, ${result.decisions.length} decisions, ${result.mistakes.length} mistakes, ${result.openQuestions.length} open Qs, ${result.cognitivePatterns.length} cognitive patterns`,
   ]
     .filter(Boolean)
     .join('\n')
@@ -146,6 +149,33 @@ export async function POST(request: NextRequest) {
     await updateBoProfile(result.facts)
   } catch (err) {
     console.error('[jarvis/reflect] updateBoProfile failed:', err instanceof Error ? err.message : err)
+  }
+
+  // Process cognitive patterns — write to bo.md section + promote as profile instincts.
+  let cognitiveCount = 0
+  if (result.cognitivePatterns?.length) {
+    try {
+      await updateCognitivePatterns(result.cognitivePatterns)
+    } catch (err) {
+      console.error('[jarvis/reflect] updateCognitivePatterns failed:', err instanceof Error ? err.message : err)
+    }
+
+    for (const cp of result.cognitivePatterns) {
+      if (cp.confidence >= 0.6) {
+        try {
+          await promoteInstinct({
+            kind: 'profile',
+            title: `Bo cognitive pattern: ${cp.pattern}`,
+            body: `Evidence: ${cp.evidence}`,
+            confidence: cp.confidence,
+            source: 'cognitive-reflection',
+          })
+          cognitiveCount++
+        } catch (err) {
+          console.error('[jarvis/reflect] cognitive promoteInstinct failed:', err instanceof Error ? err.message : err)
+        }
+      }
+    }
   }
 
   const instincts = toInstincts(result)
@@ -170,5 +200,6 @@ export async function POST(request: NextRequest) {
     extractedCount: instincts.length,
     promotedCount,
     pendingCount,
+    cognitiveCount,
   })
 }

@@ -38,6 +38,20 @@ import {
   updateCalendarEventSchema,
   deleteCalendarEventSchema,
 } from './tools-calendar'
+import {
+  learnTopic,
+  learnTopicSchema,
+  searchKnowledge,
+  searchKnowledgeSchema,
+} from './tools-learning'
+import {
+  createJarvisTask,
+  createJarvisTaskSchema,
+  listJarvisTasks,
+  listJarvisTasksSchema,
+  completeJarvisTask,
+  completeJarvisTaskSchema,
+} from './tools-tasks'
 
 export {
   createFolder,
@@ -1044,6 +1058,90 @@ export async function listen(raw: unknown): Promise<ToolResult<ListenResult>> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// delegateToClaudeCode — dispatch a task to the local Claude Code CLI.
+//
+// At Bo's discretion only — Jarvis NEVER auto-triggers this. Wait for Bo to
+// explicitly say "use Claude Code" / "delegate to Claude" etc.
+//
+// Uses claude.cmd (npm-installed Claude Code CLI on Windows). Runs with
+// --print for non-interactive mode, --no-session-persistence so it doesn't
+// inherit or pollute Jarvis's context.
+//
+// Budget cap: defaults to $0.50. Bo controls this per-task via `budgetUsd`.
+// Never goes above $2.00 without an explicit override.
+// ──────────────────────────────────────────────────────────────────────────
+
+const CLAUDE_CLI = 'C:/Users/bobel/AppData/Roaming/npm/claude.cmd'
+const CLAUDE_DEFAULT_CWD = 'C:/Users/bobel/projects/neuradexai'
+
+export const delegateToClaudeCodeSchema = z.object({
+  task: z.string().min(1).max(8000),
+  cwd: z.string().optional(),
+  budgetUsd: z.number().min(0.01).max(2.0).optional().default(0.50),
+})
+
+interface ClaudeCodeResult {
+  output: string
+  exitCode: number | null
+  budgetUsd: number
+}
+
+export async function delegateToClaudeCode(raw: unknown): Promise<ToolResult<ClaudeCodeResult>> {
+  const parsed = delegateToClaudeCodeSchema.safeParse(raw)
+  if (!parsed.success) {
+    const r = mkReceipt('delegateToClaudeCode', false, 'invalid args: ' + parsed.error.message)
+    await appendReceipt(r)
+    return { ok: false, error: parsed.error.message, receipt: r }
+  }
+
+  const { task, cwd, budgetUsd } = parsed.data
+  const workDir = cwd || CLAUDE_DEFAULT_CWD
+
+  const res = await runChild(
+    CLAUDE_CLI,
+    [
+      '--print',
+      '--output-format', 'text',
+      '--max-budget-usd', String(budgetUsd),
+      '--no-session-persistence',
+      task,
+    ],
+    { cwd: workDir, timeoutMs: 300_000 }
+  )
+
+  if (res.timedOut) {
+    const r = mkReceipt('delegateToClaudeCode', false, `claude CLI timeout (5 min) task="${task.slice(0, 60)}"`)
+    await appendReceipt(r)
+    return { ok: false, error: 'claude CLI timeout after 5 minutes', receipt: r }
+  }
+
+  const output = (res.stdout || '').trim() || (res.stderr || '').trim()
+
+  if (res.code !== 0) {
+    const r = mkReceipt('delegateToClaudeCode', false, `claude exit=${res.code} stderr=${(res.stderr || '').slice(0, 120)}`)
+    await appendReceipt(r)
+    return {
+      ok: false,
+      error: `claude exited with code ${res.code}: ${(res.stderr || '').slice(0, 500)}`,
+      receipt: r,
+    }
+  }
+
+  const r = mkReceipt(
+    'delegateToClaudeCode',
+    true,
+    `budget=$${budgetUsd} exit=${res.code} cwd=${workDir} task="${task.slice(0, 60)}"`
+  )
+  await appendReceipt(r)
+
+  return {
+    ok: true,
+    result: { output: truncate(output, 8000), exitCode: res.code, budgetUsd },
+    receipt: r,
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Registry / dispatcher
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -1179,6 +1277,45 @@ export const JARVIS_TOOLS: Record<string, ToolEntry> = {
       "Calculate today's estimated earnings from Spotless Solutions calendar events using the known pricing structure. Returns revenue total and breakdown.",
     schema: calculateEarningsSchema,
     run: calculateEarnings,
+  },
+  learnTopic: {
+    name: 'learnTopic',
+    description:
+      'Research and permanently store knowledge about any topic in the COG vault. Use when Bo says "go learn about X" or "research X for me". Stores facts as instincts that will surface in future conversations automatically.',
+    schema: learnTopicSchema,
+    run: learnTopic,
+  },
+  searchKnowledge: {
+    name: 'searchKnowledge',
+    description:
+      'Search stored COG knowledge for facts relevant to a topic or question. Use proactively when Bo asks about something Jarvis may have learned previously.',
+    schema: searchKnowledgeSchema,
+    run: searchKnowledge,
+  },
+  createJarvisTask: {
+    name: 'createJarvisTask',
+    description: "Create a new task. Use when Bo asks Jarvis to add, create, or schedule a task.",
+    schema: createJarvisTaskSchema,
+    run: createJarvisTask,
+  },
+  listJarvisTasks: {
+    name: 'listJarvisTasks',
+    description: "List Bo's active tasks.",
+    schema: listJarvisTasksSchema,
+    run: listJarvisTasks,
+  },
+  completeJarvisTask: {
+    name: 'completeJarvisTask',
+    description: "Mark a task as done.",
+    schema: completeJarvisTaskSchema,
+    run: completeJarvisTask,
+  },
+  delegateToClaudeCode: {
+    name: 'delegateToClaudeCode',
+    description:
+      'Delegate a coding or research task to the local Claude Code CLI. USE ONLY when Bo explicitly asks to use Claude Code. Never auto-trigger. Budget defaults to $0.50, max $2.00.',
+    schema: delegateToClaudeCodeSchema,
+    run: delegateToClaudeCode,
   },
 }
 

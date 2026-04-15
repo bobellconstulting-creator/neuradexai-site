@@ -1,49 +1,186 @@
 'use client'
 
-import { useMemo } from 'react'
-import { useRouter } from 'next/navigation'
-import { AGENTS } from '@/lib/agents'
-import { useMissionBridge } from '@/lib/useMissionBridge'
-import { useMissionTasks } from '@/lib/useMissionTasks'
+import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { TopBar } from '@/components/mission-control/TopBar'
-import { BottomBar } from '@/components/mission-control/BottomBar'
-import { TaskBoard } from '@/components/mission-control/TaskBoard'
-import { RadarSweep } from '@/components/mission-control/RadarSweep'
-import { LiveFeed } from '@/components/mission-control/LiveFeed'
 import { CalendarPanel } from '@/components/mission-control/CalendarPanel'
+import { TaskBoard } from '@/components/mission-control/TaskBoard'
+import { VoiceChat } from '@/components/mission-control/VoiceChat'
+import { FileDropzone } from '@/components/mission-control/FileDropzone'
+import { SystemStatusPills } from '@/components/mission-control/SystemStatusPills'
 
-// Agents visible in the lobby. Aria lives on Bo's desktop separately;
-// Axon is part of Marcus.
-const ACTIVE_AGENT_IDS = ['jarvis']
+// ─── Jarvis status hook ───────────────────────────────────────────────────────
 
-export default function MissionControlLobbyPage() {
-  const router = useRouter()
-  const { agents, events, telemetry, connected } = useMissionBridge()
-  const { tasks, counts } = useMissionTasks(3000)
+interface JarvisStatus {
+  ok: boolean
+  status: 'online' | 'offline'
+  lastProvider: string | null
+  lastActiveAt: string | null
+}
 
-  const visibleAgents = useMemo(
-    () => agents.filter((a) => ACTIVE_AGENT_IDS.includes(a.id)),
-    [agents],
-  )
+function useJarvisStatus(pollMs = 30_000) {
+  const [data, setData] = useState<JarvisStatus>({
+    ok: false,
+    status: 'offline',
+    lastProvider: null,
+    lastActiveAt: null,
+  })
 
-  const perAgentTasks = useMemo(() => {
-    const map: Record<string, { active: number; done: number; blocked: number }> = {}
-    for (const id of ACTIVE_AGENT_IDS) {
-      map[id] = { active: 0, done: 0, blocked: 0 }
+  useEffect(() => {
+    let cancelled = false
+
+    const check = async () => {
+      try {
+        const res = await fetch('/api/jarvis/status', { cache: 'no-store' })
+        if (!res.ok) throw new Error(`status ${res.status}`)
+        const json = (await res.json()) as JarvisStatus
+        if (!cancelled) setData(json)
+      } catch {
+        if (!cancelled) setData((prev) => ({ ...prev, ok: false, status: 'offline' }))
+      }
     }
-    for (const t of tasks) {
-      if (!map[t.assignedTo]) continue
-      if (t.status === 'open' || t.status === 'in_progress') map[t.assignedTo].active++
-      else if (t.status === 'done') map[t.assignedTo].done++
-      else if (t.status === 'blocked') map[t.assignedTo].blocked++
-    }
-    return map
-  }, [tasks])
 
-  const activeTaskCount = useMemo(
-    () => counts.in_progress + counts.open,
-    [counts],
+    void check()
+    const id = setInterval(() => { void check() }, pollMs)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [pollMs])
+
+  return data
+}
+
+// ─── Relative time helper ─────────────────────────────────────────────────────
+
+function relativeTime(isoString: string | null): string {
+  if (!isoString) return 'never'
+  try {
+    const diff = Date.now() - new Date(isoString).getTime()
+    const minutes = Math.floor(diff / 60_000)
+    if (minutes < 1) return 'just now'
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    return `${Math.floor(hours / 24)}d ago`
+  } catch {
+    return 'unknown'
+  }
+}
+
+// ─── Tab type ─────────────────────────────────────────────────────────────────
+
+type Tab = 'chat' | 'tasks' | 'calendar' | 'docs'
+
+// ─── Jarvis card ─────────────────────────────────────────────────────────────
+
+function JarvisCard({ status }: { status: JarvisStatus }) {
+  const isOnline = status.status === 'online'
+
+  return (
+    <div className="mc-panel mc-corners p-4 flex-shrink-0">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-4">
+        <span
+          className={`mc-dot ${isOnline ? 'mc-dot-on' : 'mc-dot-off'} shrink-0`}
+          title={isOnline ? 'Gateway reachable' : 'Gateway offline'}
+        />
+        <span className="mc-mono text-sm tracking-[0.22em] font-bold text-[#00F2FF]">
+          JARVIS
+        </span>
+        <span
+          className="ml-auto mc-mono text-[10px] tracking-widest px-2 py-0.5 rounded border"
+          style={{
+            color:       isOnline ? '#22c55e' : '#ff6060',
+            borderColor: isOnline ? 'rgba(34,197,94,0.30)' : 'rgba(255,96,96,0.30)',
+            background:  isOnline ? 'rgba(34,197,94,0.06)' : 'rgba(255,96,96,0.06)',
+          }}
+        >
+          {isOnline ? 'LIVE' : 'OFFLINE'}
+        </span>
+      </div>
+
+      {/* Stats */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="mc-label">ROLE</span>
+          <span className="mc-mono text-[11px] text-sand">Chief of Staff</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="mc-label">MODEL</span>
+          <span className="mc-mono text-[11px] text-sand truncate max-w-[140px]" title={status.lastProvider ?? 'Kimi K2 (Groq)'}>
+            {status.lastProvider ?? 'Kimi K2 (Groq)'}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="mc-label">LAST ACTIVE</span>
+          <span className="mc-mono text-[11px] text-[var(--mc-cyan)]">
+            {relativeTime(status.lastActiveAt)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="mc-label">GATEWAY</span>
+          <span className="mc-mono text-[11px] text-[var(--mc-text-mute)]">:18789</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="mc-label">TELEGRAM</span>
+          <span className="mc-mono text-[11px] text-[var(--mc-text-mute)]">@Jarvis_bell_bot</span>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="mt-4 flex flex-col gap-2">
+        <Link
+          href="/jarvis"
+          className="mc-mono text-[11px] tracking-widest text-center px-3 py-2 border border-[#00F2FF] text-[#00F2FF] rounded hover:bg-[rgba(0,242,255,0.10)] transition-colors"
+        >
+          VOICE INTERFACE →
+        </Link>
+        <Link
+          href="/mission-control/agents/jarvis"
+          className="mc-mono text-[11px] tracking-widest text-center px-3 py-2 border border-[var(--mc-border)] text-[var(--mc-text-mute)] rounded hover:border-[var(--mc-cyan)] hover:text-[var(--mc-cyan)] transition-colors"
+        >
+          AGENT DETAILS →
+        </Link>
+      </div>
+    </div>
   )
+}
+
+// ─── Tab bar ──────────────────────────────────────────────────────────────────
+
+function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
+  const tabs: Array<{ id: Tab; label: string }> = [
+    { id: 'chat',     label: 'CHAT' },
+    { id: 'tasks',    label: 'TASKS' },
+    { id: 'calendar', label: 'CALENDAR' },
+    { id: 'docs',     label: 'DOCS' },
+  ]
+
+  return (
+    <div className="flex border-b border-[var(--mc-border)]">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          onClick={() => onChange(t.id)}
+          className={`flex-1 mc-mono text-[11px] tracking-widest py-3 border-b-2 transition-colors ${
+            active === t.id
+              ? 'border-[var(--mc-cyan)] text-[var(--mc-cyan)]'
+              : 'border-transparent text-[var(--mc-text-mute)] hover:text-sand'
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ─── Page ────────────────────────────────────────────────────────────────────
+
+export default function MissionControlPage() {
+  const jarvis = useJarvisStatus(30_000)
+  const [tab, setTab] = useState<Tab>('chat')
 
   return (
     <div className="mc-root">
@@ -52,196 +189,75 @@ export default function MissionControlLobbyPage() {
       <div className="mc-scanbar" />
 
       <div className="absolute inset-0 flex flex-col">
-        <TopBar bridgeUp={connected || telemetry.bridgeUp} />
+        <TopBar bridgeUp={jarvis.ok} />
 
-        <div className="flex-1 flex flex-col min-h-0 p-4 gap-3 overflow-hidden">
-          {/* Lobby header */}
-          <div className="mc-panel mc-corners px-4 py-3 flex items-center gap-6 flex-shrink-0">
-            <div className="flex flex-col">
-              <span className="mc-mono text-sm tracking-[0.22em] font-bold text-[var(--mc-cyan)]">
-                THE BUILDING
-              </span>
-              <span className="mc-label">Bo&apos;s lobby · 1 active agent · 1 boardroom</span>
-            </div>
-            <div className="ml-auto flex items-center gap-3 md:gap-5">
-              <LobbyStat label="ACTIVE"    value={counts.open + counts.in_progress} color="#00d4ff" />
-              <LobbyStat label="BLOCKED"   value={counts.blocked}                   color="#ff6060" />
-              <div className="hidden sm:flex items-center gap-3 md:gap-5">
-                <LobbyStat label="TOTAL"     value={counts.total}   color="#edf3ff" />
-                <LobbyStat label="DONE"      value={counts.done}    color="#22c55e" />
-                <LobbyStat label="$ REVENUE" value={counts.revenue} color="#22c55e" />
-              </div>
-            </div>
-          </div>
+        {/* Main content */}
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row p-3 gap-3 overflow-hidden">
 
-          {/* Main lobby grid */}
-          <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-3">
-            {/* LEFT: office doors + calendar */}
-            <section className="col-span-1 md:col-span-4 flex flex-col gap-3 min-h-0 order-first md:order-none">
-              <div className="mc-panel mc-corners p-3 flex-shrink-0 flex flex-col">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="mc-label mc-label-brass">AGENT OFFICES</span>
-                  <span className="mc-label">{visibleAgents.length}</span>
-                </div>
-                <div className="grid grid-cols-1 gap-2 overflow-y-auto mc-scroll pr-1 max-h-[260px] md:max-h-none">
-                  {visibleAgents.map((a) => {
-                    const stats = perAgentTasks[a.id] ?? { active: 0, done: 0, blocked: 0 }
-                    return (
-                      <OfficeDoor
-                        key={a.id}
-                        agent={a}
-                        activeCount={stats.active}
-                        doneCount={stats.done}
-                        blockedCount={stats.blocked}
-                        onClick={() => router.push(`/mission-control/agents/${a.id}`)}
-                      />
-                    )
-                  })}
-
-                  {/* Boardroom door */}
-                  <button
-                    onClick={() => router.push('/mission-control/boardroom')}
-                    className="flex items-center gap-3 p-3 rounded border-2 border-dashed border-[rgba(239,179,86,0.30)] bg-[rgba(239,179,86,0.04)] hover:border-[#efb356] hover:bg-[rgba(239,179,86,0.08)] transition-all text-left group mt-2"
-                  >
-                    <span className="text-3xl" style={{ color: '#efb356' }}>⬢</span>
-                    <div className="flex-1">
-                      <div className="mc-mono text-xs tracking-[0.22em] font-bold text-[#efb356]">
-                        BOARDROOM
-                      </div>
-                      <div className="mc-label text-[10px]">The shared room — opt-in only</div>
-                    </div>
-                    <span className="mc-mono text-[10px] text-[var(--mc-text-mute)] group-hover:text-[#efb356]">
-                      ENTER →
-                    </span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Calendar panel — below agent list on both mobile and desktop */}
+          {/* LEFT RAIL — Jarvis card + Calendar (desktop only) */}
+          <aside className="hidden md:flex flex-col gap-3 w-[280px] shrink-0">
+            <JarvisCard status={jarvis} />
+            <div className="flex-1 min-h-0 overflow-hidden">
               <CalendarPanel />
-            </section>
+            </div>
+          </aside>
 
-            {/* CENTER: radar + task board */}
-            <section className="col-span-1 md:col-span-5 flex flex-col-reverse md:flex-col gap-3 min-h-0 order-3 md:order-none">
-              <div className="relative mc-panel mc-corners flex-shrink-0 h-[180px] md:h-[300px] flex items-center justify-center overflow-hidden">
-                <div className="absolute top-3 left-4 flex items-center gap-3">
-                  <span className="mc-label mc-label-brass">PRIMARY SCOPE</span>
-                </div>
-                <div className="absolute top-3 right-4 flex items-center gap-2">
-                  <span className="mc-dot mc-dot-on" />
-                  <span className="mc-label">
-                    TRACKING {visibleAgents.filter((a) => a.status !== 'offline').length}
-                  </span>
-                </div>
-                <div className="w-full h-full p-4">
-                  <RadarSweep agents={visibleAgents} taskCount={activeTaskCount} />
-                </div>
-              </div>
+          {/* RIGHT MAIN — tabbed content */}
+          <div className="flex-1 min-h-0 flex flex-col mc-panel mc-corners overflow-hidden">
+            <TabBar active={tab} onChange={setTab} />
 
-              <div className="flex-1 min-h-0">
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {tab === 'chat' && (
+                <VoiceChat
+                  agentId="jarvis"
+                  agentColor="#00F2FF"
+                  agentLabel="JARVIS"
+                  channel="mission-control"
+                />
+              )}
+              {tab === 'tasks' && (
                 <TaskBoard />
-              </div>
-            </section>
-
-            {/* RIGHT: live feed */}
-            <section className="col-span-1 md:col-span-3 flex flex-col min-h-0 order-2 md:order-none">
-              <LiveFeed events={events} />
-            </section>
+              )}
+              {tab === 'calendar' && (
+                <div className="h-full overflow-y-auto mc-scroll">
+                  <CalendarPanel />
+                </div>
+              )}
+              {tab === 'docs' && (
+                <div className="h-full overflow-hidden">
+                  <FileDropzone />
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        <BottomBar telemetry={telemetry} />
-      </div>
-    </div>
-  )
-}
-
-// ─── Subcomponents ────────────────────────────────────────────────────────────
-
-function LobbyStat({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <div className="flex flex-col items-end">
-      <span className="mc-mono text-xl font-bold leading-none" style={{ color }}>
-        {value.toString().padStart(2, '0')}
-      </span>
-      <span className="mc-label text-[9px]">{label}</span>
-    </div>
-  )
-}
-
-interface OfficeDoorProps {
-  agent: {
-    id:    string
-    label: string
-    role:  string
-    model: string
-    color: string
-    status: string
-    latencyMs: number
-    lastAction: string
-  }
-  activeCount: number
-  doneCount: number
-  blockedCount: number
-  onClick: () => void
-}
-
-function OfficeDoor({ agent, activeCount, doneCount, blockedCount, onClick }: OfficeDoorProps) {
-  const statusDot =
-    agent.status === 'online'  ? 'mc-dot-on'   :
-    agent.status === 'busy'    ? 'mc-dot-busy' :
-    agent.status === 'idle'    ? 'mc-dot-warn' :
-                                 'mc-dot-off'
-
-  return (
-    <button
-      onClick={onClick}
-      className="flex items-center gap-3 p-3 min-h-[44px] rounded border transition-all text-left group"
-      style={{
-        borderColor: `${agent.color}25`,
-        background: `${agent.color}06`,
-      }}
-    >
-      {/* Status dot */}
-      <span className={`mc-dot ${statusDot} shrink-0`} />
-
-      {/* Label + role */}
-      <div className="flex-1 min-w-0">
-        <div
-          className="mc-mono text-xs tracking-[0.22em] font-bold truncate"
-          style={{ color: agent.color }}
-        >
-          {agent.label}&apos;S OFFICE
+        {/* Mobile Jarvis card strip */}
+        <div className="md:hidden px-3 pb-2">
+          <div className="mc-panel mc-corners px-4 py-3 flex items-center gap-4">
+            <span className={`mc-dot ${jarvis.ok ? 'mc-dot-on' : 'mc-dot-off'} shrink-0`} />
+            <span className="mc-mono text-xs tracking-[0.22em] font-bold text-[#00F2FF]">JARVIS</span>
+            <span className="mc-mono text-[10px] text-[var(--mc-text-mute)]">
+              {jarvis.lastProvider ?? 'Kimi K2'}
+            </span>
+            <span className="ml-auto mc-mono text-[10px] text-[var(--mc-cyan)]">
+              {relativeTime(jarvis.lastActiveAt)}
+            </span>
+            <Link
+              href="/jarvis"
+              className="mc-mono text-[10px] tracking-widest px-2.5 py-1 border border-[#00F2FF] text-[#00F2FF] rounded hover:bg-[rgba(0,242,255,0.10)]"
+            >
+              VOICE →
+            </Link>
+          </div>
         </div>
-        <div className="mc-label text-[9px] truncate">{agent.role}</div>
-      </div>
 
-      {/* Task counts */}
-      <div className="flex items-center gap-2 shrink-0">
-        {activeCount > 0 && (
-          <div className="flex flex-col items-center">
-            <span className="mc-mono text-sm font-bold text-[#00d4ff]">{activeCount}</span>
-            <span className="mc-label text-[8px]">ACT</span>
-          </div>
-        )}
-        {doneCount > 0 && (
-          <div className="flex flex-col items-center">
-            <span className="mc-mono text-sm font-bold text-[#22c55e]">{doneCount}</span>
-            <span className="mc-label text-[8px]">DONE</span>
-          </div>
-        )}
-        {blockedCount > 0 && (
-          <div className="flex flex-col items-center">
-            <span className="mc-mono text-sm font-bold text-[#ff6060]">{blockedCount}</span>
-            <span className="mc-label text-[8px]">BLK</span>
-          </div>
-        )}
+        {/* Bottom status bar */}
+        <footer className="relative z-10 flex items-center gap-4 px-6 py-2 border-t border-[var(--mc-border)] bg-[rgba(5,7,20,0.7)] backdrop-blur-md flex-shrink-0">
+          <span className="mc-label mc-label-brass hidden sm:block">SYSTEMS</span>
+          <SystemStatusPills />
+        </footer>
       </div>
-
-      {/* Enter arrow */}
-      <span className="mc-mono text-[10px] text-[var(--mc-text-mute)] group-hover:text-[var(--mc-cyan)] shrink-0">
-        →
-      </span>
-    </button>
+    </div>
   )
 }

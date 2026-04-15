@@ -46,12 +46,20 @@ export const OpenQuestionSchema = z.object({
 })
 export type OpenQuestion = z.infer<typeof OpenQuestionSchema>
 
+export const CognitivePatternSchema = z.object({
+  pattern: z.string().min(1).max(200),
+  evidence: z.string().min(1).max(600),
+  confidence: Confidence,
+})
+export type CognitivePattern = z.infer<typeof CognitivePatternSchema>
+
 export const InstinctKind = z.enum([
   'preference',
   'decision',
   'mistake',
   'profile',
   'question',
+  'knowledge',
 ])
 export type InstinctKindT = z.infer<typeof InstinctKind>
 
@@ -70,6 +78,7 @@ export const ReflectionResultSchema = z.object({
   decisions: z.array(DecisionSchema).default([]),
   mistakes: z.array(MistakeSchema).default([]),
   openQuestions: z.array(OpenQuestionSchema).default([]),
+  cognitivePatterns: z.array(CognitivePatternSchema).default([]),
   summary: z.string().max(1200).default(''),
 })
 export type ReflectionResult = z.infer<typeof ReflectionResultSchema>

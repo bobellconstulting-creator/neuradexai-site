@@ -253,6 +253,86 @@
         },
         "required": []
       }
+    },
+    {
+      "name": "learnTopic",
+      "description": "Research and permanently store knowledge about any topic in the COG vault. Use when Bo says 'go learn about X' or 'research X for me'. Stores facts as instincts that will surface in future conversations automatically.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "topic": { "type": "string", "description": "The subject to research." },
+          "count": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Target number of facts to learn. Default 20." },
+          "depth": { "type": "string", "enum": ["surface", "deep"], "description": "surface=quick overview, deep=thorough research. Default deep." }
+        },
+        "required": ["topic"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "searchKnowledge",
+      "description": "Search stored COG knowledge for facts relevant to a topic or question. Use proactively when Bo asks about something Jarvis may have learned previously.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 20 }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "createJarvisTask",
+      "description": "Create a new task. Use when Bo asks Jarvis to add, create, or schedule a task.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": "string", "maxLength": 2000, "description": "Optional detail." },
+          "priority": { "type": "string", "enum": ["critical", "high", "medium", "low"], "description": "Default medium." }
+        },
+        "required": ["title"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "listJarvisTasks",
+      "description": "List Bo's active tasks. Defaults to open + in_progress when no status is given.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "enum": ["open", "in_progress", "done", "blocked", "all"], "description": "Filter by status. Omit for open+in_progress." }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "completeJarvisTask",
+      "description": "Mark a task as done.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "taskId": { "type": "string", "description": "The task UUID." },
+          "proof": { "type": "string", "maxLength": 500, "description": "Optional URL, path, or quote confirming completion." }
+        },
+        "required": ["taskId"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "delegateToClaudeCode",
+      "description": "Delegate a coding, debugging, or research task to the local Claude Code CLI. USE ONLY when Bo explicitly asks — never auto-trigger. Budget cap defaults to $0.50, maximum $2.00.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task": { "type": "string", "minLength": 1, "maxLength": 8000, "description": "The full instruction to pass to Claude Code." },
+          "cwd": { "type": "string", "description": "Working directory. Defaults to C:/Users/bobel/projects/neuradexai." },
+          "budgetUsd": { "type": "number", "minimum": 0.01, "maximum": 2.0, "description": "API spend cap in USD. Default 0.50." }
+        },
+        "required": ["task"],
+        "additionalProperties": false
+      }
     }
   ]
 }

@@ -2,10 +2,10 @@ import type { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Jarvis / Axon HUD',
-    short_name: 'Jarvis HUD',
+    name: 'Jarvis',
+    short_name: 'Jarvis',
     description: 'Private holographic command HUD for Jarvis and Axon.',
-    start_url: '/mission-control',
+    start_url: '/jarvis',
     display: 'standalone',
     background_color: '#000810',
     theme_color: '#000810',

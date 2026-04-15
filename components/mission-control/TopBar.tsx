@@ -33,10 +33,10 @@ export function TopBar({ bridgeUp }: TopBarProps) {
         </div>
       </div>
 
-      {/* Center: live indicator */}
+      {/* Center: connection status */}
       <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-[var(--mc-border)] bg-[rgba(0,212,255,0.05)]">
-        <span className={`mc-dot ${bridgeUp ? 'mc-dot-on' : 'mc-dot-warn'}`} />
-        <span className="mc-label">{bridgeUp ? 'LIVE · BRIDGE LINKED' : 'SIMULATED FEED'}</span>
+        <span className={`mc-dot ${bridgeUp ? 'mc-dot-on' : 'mc-dot-off'}`} />
+        <span className="mc-label">{bridgeUp ? 'JARVIS · ONLINE' : 'JARVIS · OFFLINE'}</span>
       </div>
 
       {/* Right: clock + operator */}

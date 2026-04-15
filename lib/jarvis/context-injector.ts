@@ -25,6 +25,8 @@ import {
   VAULT_PATHS,
 } from './vault'
 import type { PersistedInstinct } from './types'
+import { getUpcomingEvents } from '../google/calendar'
+import type { CalendarEvent } from '../google/calendar'
 
 // ─── Paths ─────────────────────────────────────────────────────────────────
 
@@ -39,8 +41,9 @@ const RECENT_DAILIES = 3
 
 // ─── Cache TTLs ────────────────────────────────────────────────────────────
 
-const PRIMARY_CACHE_TTL_MS = 60 * 1000        // 60 seconds — changes rarely
-const VAULT_CACHE_TTL_MS   = 5 * 60 * 1000   // 5 minutes  — dynamic content
+const PRIMARY_CACHE_TTL_MS   = 60 * 1000        // 60 seconds — changes rarely
+const VAULT_CACHE_TTL_MS     = 5 * 60 * 1000   // 5 minutes  — dynamic content
+const CALENDAR_CACHE_TTL_MS  = 5 * 60 * 1000   // 5 minutes  — live schedule
 
 // ─── Rough tokenizer ───────────────────────────────────────────────────────
 
@@ -123,6 +126,165 @@ async function getVaultCached(): Promise<VaultCache> {
  */
 export function invalidateMemoryCache(): void {
   vaultCache = null
+}
+
+// ─── Cache: calendar ───────────────────────────────────────────────────────
+
+interface CalendarCache {
+  block: string
+  fetchedAt: number
+}
+
+let calendarCache: CalendarCache | null = null
+
+const CT_TIMEZONE = 'America/Chicago'
+
+/** Kansas location keywords — anything else is considered travel. */
+const KANSAS_KEYWORDS = ['council grove', 'kansas', 'ks']
+
+function isKansasLocation(location: string): boolean {
+  const lower = location.toLowerCase()
+  return KANSAS_KEYWORDS.some((kw) => lower.includes(kw))
+}
+
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: CT_TIMEZONE,
+  })
+}
+
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    timeZone: CT_TIMEZONE,
+  })
+}
+
+function minutesUntil(iso: string): number {
+  return Math.round((new Date(iso).getTime() - Date.now()) / 60_000)
+}
+
+function renderEventLine(
+  event: CalendarEvent,
+  label: string,
+  minsUntil?: number,
+): string {
+  const timeRange = `${formatTime(event.start)}–${formatTime(event.end)}`
+  const travelTag =
+    event.location && !isKansasLocation(event.location) ? ' (TRAVELING)' : ''
+  const locationNote = event.location ? ` @ ${event.location}` : ''
+  const countdown =
+    minsUntil !== undefined && minsUntil > 0
+      ? ` (in ${minsUntil} min)`
+      : minsUntil === 0
+        ? ' (NOW)'
+        : ''
+
+  return `${label}: ${event.summary} — ${timeRange}${locationNote}${travelTag}${countdown}`
+}
+
+async function buildCalendarBlock(): Promise<string> {
+  if (calendarCache && Date.now() - calendarCache.fetchedAt < CALENDAR_CACHE_TTL_MS) {
+    return calendarCache.block
+  }
+
+  try {
+    const events = await getUpcomingEvents(2)
+    const now = Date.now()
+
+    const upcoming: CalendarEvent[] = []
+    const later: CalendarEvent[] = []
+    const tomorrow: CalendarEvent[] = []
+
+    const todayStr = new Date().toLocaleDateString('en-US', { timeZone: CT_TIMEZONE })
+
+    for (const ev of events) {
+      const startMs = new Date(ev.start).getTime()
+      const endMs = new Date(ev.end).getTime()
+      const minsToStart = (startMs - now) / 60_000
+      const isInProgress = startMs <= now && endMs > now
+      const eventDateStr = new Date(ev.start).toLocaleDateString('en-US', {
+        timeZone: CT_TIMEZONE,
+      })
+      const isToday = eventDateStr === todayStr
+
+      if (isInProgress || (minsToStart >= 0 && minsToStart <= 240)) {
+        upcoming.push(ev)
+      } else if (isToday && startMs > now) {
+        later.push(ev)
+      } else if (!isToday) {
+        tomorrow.push(ev)
+      }
+    }
+
+    const nowDt = new Date()
+    const currentTimeStr = nowDt.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: CT_TIMEZONE,
+    })
+    const currentDateStr = nowDt.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      timeZone: CT_TIMEZONE,
+    })
+
+    const lines: string[] = [
+      `## Live Calendar Context (CT timezone)`,
+      `Current time: ${currentTimeStr} CT | ${currentDateStr}`,
+      '',
+    ]
+
+    if (upcoming.length === 0 && later.length === 0 && tomorrow.length === 0) {
+      lines.push('No events in the next 48 hours.')
+    } else {
+      // Show the soonest upcoming/in-progress event as NEXT UP
+      if (upcoming.length > 0) {
+        const next = upcoming[0]
+        const startMs = new Date(next.start).getTime()
+        const isNow = startMs <= now
+        const label = isNow ? 'IN PROGRESS' : 'NEXT UP'
+        const minsAway = isNow ? undefined : minutesUntil(next.start)
+        lines.push(renderEventLine(next, label, minsAway))
+
+        // Any remaining in the 4h window
+        for (let i = 1; i < upcoming.length; i++) {
+          lines.push(renderEventLine(upcoming[i], 'SOON', minutesUntil(upcoming[i].start)))
+        }
+      } else if (later.length > 0) {
+        // Nothing within 4h — show next event with countdown
+        lines.push(renderEventLine(later[0], 'NEXT UP', minutesUntil(later[0].start)))
+        later.shift()
+      }
+
+      // Later today
+      for (const ev of later) {
+        lines.push(renderEventLine(ev, 'LATER TODAY'))
+      }
+
+      // Tomorrow
+      for (const ev of tomorrow) {
+        const dayLabel = `TOMORROW (${formatDate(ev.start)})`
+        lines.push(renderEventLine(ev, dayLabel))
+      }
+    }
+
+    const block = lines.join('\n')
+    calendarCache = { block, fetchedAt: Date.now() }
+    return block
+  } catch {
+    // Never break Jarvis if calendar is unavailable.
+    calendarCache = { block: '', fetchedAt: Date.now() }
+    return ''
+  }
 }
 
 // ─── Fresh-session detection ───────────────────────────────────────────────
@@ -224,9 +386,10 @@ function fitToBudget(
  * distinguish persona ground-truth from learned signal.
  */
 export async function buildJarvisSystemPrompt(): Promise<string> {
-  const [freshDay, vault] = await Promise.all([
+  const [freshDay, vault, calendarBlock] = await Promise.all([
     isFreshDaySession(),
     getVaultCached(),
+    buildCalendarBlock(),
   ])
 
   // Choose the anchor: full SOUL on day-start, lean primary.md otherwise.
@@ -234,18 +397,17 @@ export async function buildJarvisSystemPrompt(): Promise<string> {
 
   const memorySection = fitToBudget(vault.bo, vault.instincts, vault.dailies)
 
-  if (!memorySection.trim()) {
-    return anchor
+  const parts: string[] = [anchor]
+
+  if (memorySection.trim()) {
+    parts.push(
+      `---\n\n# JARVIS LEARNED MEMORY (auto-injected from vault, max ${MEMORY_TOKEN_BUDGET} tokens)\n\n${memorySection}\n\n---\nEnd learned memory. Apply it as ground truth about Bo's preferences and history. Never repeat memory back unless asked.`,
+    )
   }
 
-  return `${anchor}
+  if (calendarBlock.trim()) {
+    parts.push(calendarBlock)
+  }
 
----
-
-# JARVIS LEARNED MEMORY (auto-injected from vault, max ${MEMORY_TOKEN_BUDGET} tokens)
-
-${memorySection}
-
----
-End learned memory. Apply it as ground truth about Bo's preferences and history. Never repeat memory back unless asked.`
+  return parts.join('\n\n')
 }

@@ -156,14 +156,16 @@ function UploadRow({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function FileDropzone({ onInjectFile }: FileDropzoneProps) {
-  const { uploads, upload } = useMissionUploads()
+  const { uploads, refresh } = useMissionUploads()
   const [isUploading, setIsUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [confirmation, setConfirmation] = useState<string | null>(null)
 
   const handleDrop = useCallback(
     async (acceptedFiles: File[]) => {
       setError(null)
+      setConfirmation(null)
 
       // Client-side guards
       const oversized = acceptedFiles.filter(f => f.size > MAX_BYTES)
@@ -188,10 +190,27 @@ export function FileDropzone({ onInjectFile }: FileDropzoneProps) {
           setProgress(p => (p < 85 ? p + 5 : p))
         }, 200)
 
-        await upload(valid)
+        let lastConfirmation: string | null = null
+        for (const file of valid) {
+          const form = new FormData()
+          form.append('file', file, file.name)
+          const res = await fetch('/api/jarvis/upload', { method: 'POST', body: form })
+          if (!res.ok) {
+            let detail = ''
+            try {
+              const data = (await res.json()) as { error?: string }
+              detail = data.error ?? ''
+            } catch { /* non-JSON */ }
+            throw new Error(`upload ${res.status}${detail ? `: ${detail}` : ''}`)
+          }
+          const data = (await res.json()) as { ok: boolean; confirmation?: string }
+          if (data.confirmation) lastConfirmation = data.confirmation
+        }
 
         clearInterval(tick)
         setProgress(100)
+        if (lastConfirmation) setConfirmation(lastConfirmation)
+        await refresh()
 
         setTimeout(() => {
           setIsUploading(false)
@@ -205,7 +224,7 @@ export function FileDropzone({ onInjectFile }: FileDropzoneProps) {
         setProgress(0)
       }
     },
-    [upload]
+    [refresh]
   )
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -434,6 +453,60 @@ export function FileDropzone({ onInjectFile }: FileDropzoneProps) {
               background: 'none',
               border: 'none',
               color: 'rgba(255,128,128,0.6)',
+              cursor: 'pointer',
+              fontSize: 12,
+              lineHeight: 1,
+              padding: 0,
+              minHeight: 44,
+              minWidth: 44,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Confirmation banner */}
+      {confirmation && (
+        <div
+          style={{
+            margin: '6px 10px 0',
+            padding: '5px 10px',
+            borderRadius: 6,
+            background: 'rgba(34,197,94,0.08)',
+            border: '1px solid rgba(34,197,94,0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: '#22c55e',
+              boxShadow: '0 0 6px #22c55e',
+              flexShrink: 0,
+            }}
+          />
+          <span
+            className="mc-mono"
+            style={{ fontSize: 10, color: '#86efac' }}
+          >
+            {confirmation}
+          </span>
+          <button
+            type="button"
+            onClick={() => setConfirmation(null)}
+            style={{
+              marginLeft: 'auto',
+              background: 'none',
+              border: 'none',
+              color: 'rgba(134,239,172,0.6)',
               cursor: 'pointer',
               fontSize: 12,
               lineHeight: 1,

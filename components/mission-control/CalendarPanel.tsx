@@ -11,14 +11,21 @@ interface CalendarEvent {
   description?: string
 }
 
+function parseLocalDate(iso: string): Date {
+  // Date-only strings (YYYY-MM-DD) must be parsed as LOCAL midnight, not UTC.
+  // new Date("2026-04-14") = UTC midnight = April 13 in CT — wrong.
+  if (!iso.includes('T')) {
+    const [y, m, d] = iso.split('-').map(Number)
+    return new Date(y, m - 1, d)
+  }
+  return new Date(iso)
+}
+
 function fmtTime(iso: string): string {
   try {
-    const d = new Date(iso)
+    const d = parseLocalDate(iso)
     if (isNaN(d.getTime())) return iso
-    // All-day events have date-only strings (no T)
-    if (!iso.includes('T')) {
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    }
+    if (!iso.includes('T')) return 'All day'
     return d.toLocaleTimeString('en-US', {
       hour:   'numeric',
       minute: '2-digit',
@@ -31,7 +38,7 @@ function fmtTime(iso: string): string {
 
 function fmtDate(iso: string): string {
   try {
-    const d = new Date(iso)
+    const d = parseLocalDate(iso)
     if (isNaN(d.getTime())) return ''
     return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
   } catch {

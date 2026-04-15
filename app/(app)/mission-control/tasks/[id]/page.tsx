@@ -371,7 +371,7 @@ export default function TaskDeepDivePage() {
         </section>
       </main>
 
-      <BottomBar telemetry={telemetry} />
+      <BottomBar />
     </div>
   )
 }

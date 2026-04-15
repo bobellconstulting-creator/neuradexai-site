@@ -12,6 +12,7 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import {
   type ProfileDelta,
+  type CognitivePattern,
   type Instinct,
   type PersistedInstinct,
   PersistedInstinctSchema,
@@ -154,6 +155,55 @@ export async function updateBoProfile(deltas: ProfileDelta[]): Promise<void> {
     } else {
       // Create new section.
       next += `\n${sectionHeader}\n${bullet}\n`
+    }
+  }
+
+  if (next !== existing) {
+    await atomicWrite(BO_FILE, next)
+  }
+}
+
+// ─── Cognitive patterns ────────────────────────────────────────────────────
+
+const COGNITIVE_SECTION = '## Cognitive Patterns'
+
+/**
+ * Merge CognitivePatterns into the dedicated section of bo.md.
+ *
+ * Format per entry:
+ *   - <!-- pattern:<hash> --> **<pattern>** (conf <confidence>) — _<evidence>_
+ *
+ * Content-hash deduped on pattern text: identical pattern = no-op.
+ * Atomic write same as updateBoProfile.
+ */
+export async function updateCognitivePatterns(patterns: CognitivePattern[]): Promise<void> {
+  if (patterns.length === 0) return
+
+  const existing = (await readIfExists(BO_FILE)) ?? BO_FRONTMATTER
+  let next = existing
+
+  for (const cp of patterns) {
+    const pattern = cp.pattern.trim()
+    const evidence = cp.evidence.trim()
+    if (!pattern || !evidence) continue
+
+    // Dedupe on pattern text only — same pattern, different evidence = no-op
+    // so we don't overwrite a higher-confidence entry with a weaker one.
+    const hash = shortHash(`cognitive::${pattern}`)
+    const marker = `<!-- pattern:${hash} -->`
+    if (next.includes(marker)) continue
+
+    const bullet =
+      `- ${marker} **${pattern}** (conf ${cp.confidence.toFixed(2)}) — _${evidence}_`
+
+    if (next.includes(COGNITIVE_SECTION)) {
+      // Append bullet under existing section.
+      const escaped = COGNITIVE_SECTION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const sectionRegex = new RegExp(`(${escaped}\\s*\\n(?:[^#]*\\n)*)`, 'i')
+      next = next.replace(sectionRegex, (match) => `${match}${bullet}\n`)
+    } else {
+      // Create section at end of file.
+      next += `\n${COGNITIVE_SECTION}\n${bullet}\n`
     }
   }
 

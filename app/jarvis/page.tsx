@@ -1,20 +1,107 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import JarvisHUD from '@/components/jarvis/JarvisHUD'
 import JarvisChat from '@/components/jarvis/JarvisChat'
 import JarvisApproval from '@/components/jarvis/JarvisApproval'
+import JarvisMobileShell from '@/components/jarvis/mobile/JarvisMobileShell'
+import VoiceTab from '@/components/jarvis/mobile/VoiceTab'
+import MobileChatTab from '@/components/jarvis/mobile/MobileChatTab'
+import TasksTab from '@/components/jarvis/mobile/TasksTab'
+import DocsTab from '@/components/jarvis/mobile/DocsTab'
 import { JARVIS_TEAM, type JarvisMessage } from '@/components/jarvis/jarvisData'
 import { useJarvisWS } from '@/hooks/useJarvisWS'
+import { useJarvisVoice } from '@/hooks/useJarvisVoice'
+import type { MissionTask } from '@/lib/missionTasks'
+import type { IngestedDoc } from '@/lib/jarvis/doc-ingester'
 
 const JarvisScene = dynamic(() => import('@/components/jarvis/JarvisScene'), { ssr: false })
+
+type Tab = 'voice' | 'chat' | 'calendar' | 'tasks' | 'docs'
+
+function ComingSoon({ label }: { label: string }) {
+  return (
+    <div className="flex items-center justify-center min-h-full">
+      <span className="font-mono text-xs tracking-widest text-white/20 uppercase">{label} — Coming soon</span>
+    </div>
+  )
+}
 
 export default function JarvisPage() {
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [chatMode, setChatMode]               = useState<'private' | 'broadcast'>('broadcast')
   const [isSpeaking, setIsSpeaking]           = useState(false)
+  const [isMobile, setIsMobile]               = useState(false)
+  const [activeTab, setActiveTab]             = useState<Tab>('voice')
+  const [audioUnlocked, setAudioUnlocked]     = useState(false)
   const audioLevelRef                         = useRef<number>(0)
+  const [tasks, setTasks]                     = useState<MissionTask[]>([])
+  const [tasksLoading, setTasksLoading]       = useState(false)
+
+  // ── Docs state ──────────────────────────────────────────────────────────────
+  const [recentDocs, setRecentDocs]               = useState<IngestedDoc[]>([])
+  const [uploading, setUploading]                 = useState(false)
+  const [uploadConfirmation, setUploadConfirmation] = useState('')
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
+
+  const fetchTasks = useCallback(async () => {
+    setTasksLoading(true)
+    try {
+      const res = await fetch('/api/jarvis/tasks?status=open')
+      const data = await res.json() as { ok: boolean; tasks?: MissionTask[] }
+      if (data.ok && data.tasks) setTasks(data.tasks)
+    } catch {
+      // non-fatal — tasks will just show stale
+    } finally {
+      setTasksLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { void fetchTasks() }, [fetchTasks])
+  useEffect(() => { if (activeTab === 'tasks') void fetchTasks() }, [activeTab, fetchTasks])
+
+  const handleAddTask = useCallback(async (title: string) => {
+    await fetch('/api/jarvis/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+    await fetchTasks()
+  }, [fetchTasks])
+
+  const handleCompleteTask = useCallback(async (id: string) => {
+    await fetch('/api/jarvis/tasks', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status: 'done' }),
+    })
+    await fetchTasks()
+  }, [fetchTasks])
+
+  const handleUpload = useCallback(async (file: File) => {
+    setUploading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/jarvis/upload', { method: 'POST', body: form })
+      const data = await res.json() as { ok: boolean; doc?: IngestedDoc; confirmation?: string }
+      if (data.ok && data.doc && data.confirmation) {
+        setUploadConfirmation(data.confirmation)
+        setRecentDocs(prev => [data.doc!, ...prev].slice(0, 5))
+      }
+    } catch {
+      // best-effort: UI stays unchanged if fetch throws
+    } finally {
+      setUploading(false)
+    }
+  }, [])
 
   const {
     connected,
@@ -27,6 +114,24 @@ export default function JarvisPage() {
     deny,
     mode,
   } = useJarvisWS()
+
+  const {
+    state: voiceState,
+    transcript: voiceTranscript,
+    reply: voiceReply,
+    error: voiceError,
+    supported: voiceSupported,
+    toggleListening,
+    setAlwaysOn,
+    alwaysOn,
+    unlock,
+  } = useJarvisVoice({
+    alwaysOn: false,
+    onReply: (text) => {
+      // Surface the Jarvis voice reply into the WS chat history as well.
+      send(text)
+    },
+  })
 
   const messages: JarvisMessage[] = wsMessages.map(m => ({
     id:      m.id,
@@ -50,6 +155,63 @@ export default function JarvisPage() {
       : agent.status,
   }))
 
+  if (isMobile) {
+    return (
+      <JarvisMobileShell
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        isListening={voiceState === 'listening'}
+        isSpeaking={isSpeaking}
+        isThinking={isThinking}
+        connected={true}
+      >
+        {activeTab === 'voice' && (
+          <VoiceTab
+            isListening={voiceState === 'listening'}
+            isSpeaking={voiceState === 'speaking'}
+            isThinking={voiceState === 'thinking'}
+            alwaysListening={alwaysOn}
+            onToggleListening={toggleListening}
+            onToggleAlwaysListening={() => setAlwaysOn(!alwaysOn)}
+            lastTranscript={voiceTranscript}
+            lastReply={voiceReply}
+            voiceError={voiceError}
+            voiceSupported={voiceSupported}
+            audioUnlocked={audioUnlocked}
+            onUnlock={() => {
+              unlock()
+              setAudioUnlocked(true)
+            }}
+          />
+        )}
+        {activeTab === 'chat' && (
+          <div className="h-full">
+            <MobileChatTab />
+          </div>
+        )}
+        {activeTab === 'calendar' && <ComingSoon label="Calendar" />}
+        {activeTab === 'tasks' && (
+          <TasksTab
+            tasks={tasks}
+            loading={tasksLoading}
+            onAddTask={handleAddTask}
+            onComplete={handleCompleteTask}
+            onRefresh={fetchTasks}
+          />
+        )}
+        {activeTab === 'docs' && (
+          <DocsTab
+            recentDocs={recentDocs}
+            onUpload={handleUpload}
+            uploading={uploading}
+            lastConfirmation={uploadConfirmation}
+          />
+        )}
+      </JarvisMobileShell>
+    )
+  }
+
+  // Desktop layout — untouched
   return (
     <div className="fixed inset-0 overflow-hidden" style={{ background: '#000810' }}>
       <div className="absolute inset-0 pointer-events-none" style={{

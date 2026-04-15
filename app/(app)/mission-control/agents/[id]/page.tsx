@@ -1,23 +1,14 @@
 'use client'
 
-import dynamic from 'next/dynamic'
 import { notFound, useParams, useRouter } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AgentConfig } from '@/lib/agents'
 import type { MissionTask, TaskPriority } from '@/lib/missionTasks'
 import type { MissionMessage } from '@/lib/missionStream'
-import type { GraphData, GraphNode } from '@/types/agent-graph'
 import { useMissionBridge } from '@/lib/useMissionBridge'
 import { TopBar } from '@/components/mission-control/TopBar'
 import { BottomBar } from '@/components/mission-control/BottomBar'
-import { NodeDetailCard } from '@/components/mission-control/AgentRoom/NodeDetailCard'
 import { VoiceChat } from '@/components/mission-control/VoiceChat'
-
-// WebGL — must not run on the server
-const AgentRoomScene = dynamic(
-  () => import('@/components/mission-control/AgentRoom/AgentRoomScene'),
-  { ssr: false, loading: () => <ConstellationSkeleton /> },
-)
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -66,26 +57,15 @@ function ageStr(ts: number | null): string {
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
-type AgentTab = 'graph' | 'chat'
-
 export default function AgentProfilePage() {
   const params  = useParams<{ id: string }>()
   const router  = useRouter()
-  const { telemetry, connected, agents } = useMissionBridge()
-
-  // Active tab
-  const [tab, setTab] = useState<AgentTab>('chat')
+  const { connected, agents } = useMissionBridge()
 
   // Agent profile (tasks, soul, stats)
   const [profile, setProfile]           = useState<AgentProfile | null>(null)
   const [loading, setLoading]           = useState<boolean>(true)
   const [notFoundFlag, setNotFoundFlag] = useState<boolean>(false)
-
-  // Constellation state
-  const [graph, setGraph]               = useState<GraphData | null>(null)
-  const [graphError, setGraphError]     = useState<boolean>(false)
-  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
 
   // ── Fetch profile ──────────────────────────────────────────────────────
 
@@ -108,37 +88,6 @@ export default function AgentProfilePage() {
     const t = setInterval(fetchProfile, 3000)
     return () => clearInterval(t)
   }, [fetchProfile])
-
-  // ── Fetch graph ────────────────────────────────────────────────────────
-
-  const fetchGraph = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/mission/agents/${params.id}/graph`, { cache: 'no-store' })
-      if (!res.ok) { setGraphError(true); return }
-      const data = (await res.json()) as GraphData
-      setGraph(data)
-    } catch {
-      setGraphError(true)
-    }
-  }, [params.id])
-
-  useEffect(() => {
-    fetchGraph()
-  }, [fetchGraph])
-
-  // ── Node selection ─────────────────────────────────────────────────────
-
-  const handleSelectNode = useCallback((node: GraphNode | null) => {
-    setSelectedNode(node)
-    setFocusedNodeId(node?.id ?? null)
-  }, [])
-
-  const handleCloseDetail = useCallback(() => {
-    setSelectedNode(null)
-    setFocusedNodeId(null)
-  }, [])
-
-  // Dismiss detail on Escape is handled inside NodeDetailCard itself
 
   // ── Guards ─────────────────────────────────────────────────────────────
 
@@ -170,7 +119,7 @@ export default function AgentProfilePage() {
       <div className="mc-scanbar" />
 
       <div className="absolute inset-0 flex flex-col">
-        <TopBar bridgeUp={connected || telemetry.bridgeUp} />
+        <TopBar bridgeUp={connected} />
 
         <div className="flex-1 flex flex-col min-h-0 p-4 gap-3 overflow-hidden">
 
@@ -198,134 +147,31 @@ export default function AgentProfilePage() {
               <span className="mc-label hidden sm:inline">MODEL · {agent.model}</span>
               {agent.port && <span className="mc-label mc-label-brass hidden sm:inline">:{agent.port}</span>}
               <span className={`mc-dot ${statusDot}`} />
-              {/* Tab switcher */}
-              <div className="flex items-center gap-1 bg-[rgba(5,7,20,0.55)] border border-[var(--mc-border)] rounded p-0.5">
-                <button
-                  onClick={() => setTab('chat')}
-                  className={`mc-mono text-[10px] tracking-widest px-3 py-1.5 rounded transition-all ${
-                    tab === 'chat'
-                      ? 'bg-[rgba(0,212,255,0.15)] text-[var(--mc-cyan)] border border-[var(--mc-cyan)]'
-                      : 'text-[var(--mc-text-mute)] hover:text-sand'
-                  }`}
-                >
-                  CHAT
-                </button>
-                <button
-                  onClick={() => setTab('graph')}
-                  className={`mc-mono text-[10px] tracking-widest px-3 py-1.5 rounded transition-all ${
-                    tab === 'graph'
-                      ? 'bg-[rgba(0,212,255,0.15)] text-[var(--mc-cyan)] border border-[var(--mc-cyan)]'
-                      : 'text-[var(--mc-text-mute)] hover:text-sand'
-                  }`}
-                >
-                  GRAPH
-                </button>
-              </div>
             </div>
           </div>
 
-          {/* Main content — switches between chat tab and graph+tasks tab */}
-          {tab === 'chat' ? (
-            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-3">
-              <section className="col-span-1 md:col-span-9 mc-panel mc-corners flex flex-col min-h-0">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--mc-border)]">
-                  <span className="mc-label mc-label-brass">{agent.label} · DIRECT LINE</span>
-                  <span className="mc-label text-[var(--mc-cyan)]">VOICE ENABLED</span>
-                </div>
-                <VoiceChat
-                  agentId={agent.id}
-                  agentColor={agent.color}
-                  agentLabel={agent.label}
-                  channel={`office:${agent.id}`}
-                />
-              </section>
-              <section className="col-span-1 md:col-span-3 flex flex-col gap-3 min-h-0">
-                <AgentTaskPanel agent={agent} tasks={tasks} onRefresh={fetchProfile} />
-              </section>
-            </div>
-          ) : (
-            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-3 overflow-y-auto md:overflow-hidden pb-[140px] md:pb-0">
-              {/* LEFT/CENTER: 3D constellation canvas */}
-              <section className="col-span-1 md:col-span-9 h-[280px] md:h-auto min-h-0 relative mc-panel mc-corners overflow-hidden flex-shrink-0">
-                {graph && !graphError ? (
-                  <AgentRoomScene
-                    graph={graph}
-                    focusedNodeId={focusedNodeId}
-                    onSelectNode={handleSelectNode}
-                    agentAccentColor={agent.color}
-                    className="w-full h-full"
-                  />
-                ) : graphError ? (
-                  <ConstellationErrorFallback agentLabel={agent.label} onRetry={fetchGraph} />
-                ) : (
-                  <ConstellationSkeleton />
-                )}
-                <div className="absolute top-2 left-3 pointer-events-none">
-                  <span className="mc-label mc-label-brass text-[9px]">
-                    {agent.label} · KNOWLEDGE GRAPH
-                  </span>
-                </div>
-                {!selectedNode && graph && !graphError && (
-                  <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
-                    <span className="mc-label text-[var(--mc-text-mute)] text-[9px]">
-                      CLICK A NODE TO INSPECT
-                    </span>
-                  </div>
-                )}
-              </section>
-              {/* RIGHT: task panel */}
-              <section className="col-span-1 md:col-span-3 flex flex-col gap-3 min-h-0">
-                <AgentTaskPanel agent={agent} tasks={tasks} onRefresh={fetchProfile} />
-              </section>
-            </div>
-          )}
+          {/* Main content — chat left, tasks right */}
+          <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-3">
+            <section className="col-span-1 md:col-span-9 mc-panel mc-corners flex flex-col min-h-0">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--mc-border)]">
+                <span className="mc-label mc-label-brass">{agent.label} · DIRECT LINE</span>
+                <span className="mc-label text-[var(--mc-cyan)]">VOICE ENABLED</span>
+              </div>
+              <VoiceChat
+                agentId={agent.id}
+                agentColor={agent.color}
+                agentLabel={agent.label}
+                channel={`office:${agent.id}`}
+              />
+            </section>
+            <section className="col-span-1 md:col-span-3 flex flex-col gap-3 min-h-0">
+              <AgentTaskPanel agent={agent} tasks={tasks} onRefresh={fetchProfile} />
+            </section>
+          </div>
         </div>
 
-        <BottomBar telemetry={telemetry} />
+        <BottomBar />
       </div>
-
-      {/* Node detail card — overlays the constellation on both mobile & desktop */}
-      {selectedNode && (
-        <NodeDetailCard
-          node={selectedNode}
-          agent={agent}
-          onClose={handleCloseDetail}
-        />
-      )}
-    </div>
-  )
-}
-
-// ── Skeleton / fallback ────────────────────────────────────────────────────
-
-function ConstellationSkeleton() {
-  return (
-    <div className="w-full h-full flex items-center justify-center">
-      <span className="mc-label text-[var(--mc-text-mute)] animate-pulse">
-        LOADING CONSTELLATION…
-      </span>
-    </div>
-  )
-}
-
-function ConstellationErrorFallback({
-  agentLabel,
-  onRetry,
-}: {
-  agentLabel: string
-  onRetry: () => void
-}) {
-  return (
-    <div className="w-full h-full flex flex-col items-center justify-center gap-3">
-      <span className="mc-label text-[#ff6060]">
-        GRAPH UNAVAILABLE FOR {agentLabel}
-      </span>
-      <button
-        onClick={onRetry}
-        className="mc-mono text-[10px] tracking-widest px-3 py-1 border border-[var(--mc-border)] text-sand-dim hover:text-[var(--mc-cyan)] hover:border-[var(--mc-cyan)] rounded"
-      >
-        RETRY
-      </button>
     </div>
   )
 }

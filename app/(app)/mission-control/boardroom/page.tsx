@@ -96,7 +96,7 @@ export default function BoardroomPage() {
           </div>
         </div>
 
-        <BottomBar telemetry={telemetry} />
+        <BottomBar />
       </div>
     </div>
   )

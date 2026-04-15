@@ -21,11 +21,12 @@ You receive a session transcript between Bo Bell (operator) and Jarvis (AI agent
 Output a SINGLE JSON object matching this schema (no prose, no markdown fences, no code blocks — just raw JSON):
 
 {
-  "facts":         [{ "field": string, "value": string, "confidence": 0..1 }],
-  "preferences":   [{ "kind": "liked"|"disliked", "about": string, "detail": string, "confidence": 0..1 }],
-  "decisions":     [{ "decision": string, "rationale": string, "confidence": 0..1 }],
-  "mistakes":      [{ "mistake": string, "avoidance": string, "confidence": 0..1 }],
-  "openQuestions": [{ "question": string, "confidence": 0..1 }],
+  "facts":             [{ "field": string, "value": string, "confidence": 0..1 }],
+  "preferences":       [{ "kind": "liked"|"disliked", "about": string, "detail": string, "confidence": 0..1 }],
+  "decisions":         [{ "decision": string, "rationale": string, "confidence": 0..1 }],
+  "mistakes":          [{ "mistake": string, "avoidance": string, "confidence": 0..1 }],
+  "openQuestions":     [{ "question": string, "confidence": 0..1 }],
+  "cognitivePatterns": [{ "pattern": string, "evidence": string, "confidence": 0..1 }],
   "summary": string
 }
 
@@ -36,6 +37,7 @@ Rules:
 - "preferences" are about how Bo wants work done (style, tools, vendors, formats).
 - "decisions" are concrete commitments made this session.
 - "mistakes" are things Jarvis (or the agent) got wrong; "avoidance" describes how to avoid repeating.
+- "cognitivePatterns" captures HOW Bo thinks — mental models, decision heuristics, communication style, analogy preferences, risk tolerance signals. Examples: "prefers voice when mobile", "uses farming/hunting analogies for business concepts", "pushes back on scope creep immediately", "circles back to unfinished items", "thinks in systems not features". Min confidence 0.6. Max 5 per session.
 - Never invent. If the transcript doesn't support it, leave it out.
 - Keep each item under 200 words.`
 
