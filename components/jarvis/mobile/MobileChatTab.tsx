@@ -98,7 +98,7 @@ export default function MobileChatTab() {
               className={`max-w-[82%] px-3 py-2 rounded-xl text-[13px] leading-relaxed ${
                 msg.role === 'user'
                   ? 'bg-[#00D4FF]/15 text-white border border-[#00D4FF]/20'
-                  : 'bg-white/5 text-white/85 border border-white/8'
+                  : 'bg-white/5 text-white/80 border border-white/10'
               }`}
             >
               {msg.content}
@@ -108,7 +108,7 @@ export default function MobileChatTab() {
 
         {thinking && (
           <div className="flex justify-start">
-            <div className="px-3 py-2 rounded-xl bg-white/5 border border-white/8">
+            <div className="px-3 py-2 rounded-xl bg-white/5 border border-white/10">
               <span className="font-mono text-[11px] tracking-widest text-[#00D4FF]/60 animate-pulse">
                 thinking…
               </span>

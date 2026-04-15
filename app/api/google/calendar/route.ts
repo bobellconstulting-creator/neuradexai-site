@@ -18,6 +18,9 @@ export const dynamic = 'force-dynamic'
 const OAUTH_JSON_PATH = 'C:/Users/bobel/.secrets/google-oauth.json'
 
 function isAuthenticated(): boolean {
+  // Env var takes priority (Vercel). If set, we're auth'd.
+  if (process.env.GOOGLE_OAUTH_REFRESH_TOKEN) return true
+  // Local file fallback for dev.
   try {
     if (!existsSync(OAUTH_JSON_PATH)) return false
     const raw = readFileSync(OAUTH_JSON_PATH, 'utf8')

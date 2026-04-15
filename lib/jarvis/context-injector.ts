@@ -84,14 +84,18 @@ async function loadPrimaryMd(): Promise<string> {
 
 // ─── Cache: SOUL.md ────────────────────────────────────────────────────────
 
+const SOUL_CACHE_TTL_MS = 5 * 60 * 1_000 // 5 minutes
 let soulCache: string | null = null
+let soulFetchedAt = 0
 
 async function loadSoul(): Promise<string> {
-  if (soulCache !== null) return soulCache
+  if (soulCache !== null && Date.now() - soulFetchedAt < SOUL_CACHE_TTL_MS) return soulCache
   try {
     soulCache = await readFile(SOUL_PATH, 'utf8')
+    soulFetchedAt = Date.now()
   } catch {
     soulCache = `# Jarvis\n\nYou are Jarvis, Bo Bell's AI chief of operations.\n`
+    soulFetchedAt = Date.now()
   }
   return soulCache
 }

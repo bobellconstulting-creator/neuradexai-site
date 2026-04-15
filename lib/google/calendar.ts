@@ -59,6 +59,11 @@ let cacheExpiresAt = 0
 // ──────────────────────────────────────────────────────────────────────────
 
 function readStoredTokens(): StoredTokens | null {
+  // Env var takes priority — works on Vercel where the local file doesn't exist.
+  const envToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN
+  if (envToken) return { refresh_token: envToken }
+
+  // Local fallback — works on Bo's machine during dev.
   try {
     const raw = readFileSync(OAUTH_JSON_PATH, 'utf8')
     const parsed: unknown = JSON.parse(raw)

@@ -179,16 +179,29 @@ export function useJarvisVoice(options: UseJarvisVoiceOptions = {}): UseJarvisVo
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setState, speakFallback, playAudio])
 
+  // ── Voice conversation history (persists for the session) ─────────────────
+  const voiceHistoryRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+
   // ── handleTranscript — send to Jarvis, speak reply ────────────────────────
   const handleTranscript = useCallback((text: string) => {
     setTranscript(text)
     onTranscriptRef.current?.(text)
     setState('thinking')
 
+    // Append user turn to local history before sending.
+    voiceHistoryRef.current = [
+      ...voiceHistoryRef.current,
+      { role: 'user' as const, content: text },
+    ].slice(-20) // keep last 20 turns to avoid ballooning context
+
     fetch('/api/jarvis/telegram', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({
+        message: text,
+        chatId: 'voice-chat',
+        history: voiceHistoryRef.current,
+      }),
     })
       .then(async (res) => {
         if (!res.ok) { setError(`HTTP ${res.status}`); setState('error'); return }
@@ -196,6 +209,11 @@ export function useJarvisVoice(options: UseJarvisVoiceOptions = {}): UseJarvisVo
         const replyText = data.reply ?? ''
         if (!replyText) { setState(alwaysOnRef.current ? 'listening' : 'idle'); return }
         setReply(replyText)
+        // Append assistant turn to history for multi-turn context.
+        voiceHistoryRef.current = [
+          ...voiceHistoryRef.current,
+          { role: 'assistant' as const, content: replyText },
+        ].slice(-20)
         onReplyRef.current?.(replyText)
         speakReply(replyText)
       })

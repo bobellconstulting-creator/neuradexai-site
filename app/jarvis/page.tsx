@@ -10,6 +10,7 @@ import VoiceTab from '@/components/jarvis/mobile/VoiceTab'
 import MobileChatTab from '@/components/jarvis/mobile/MobileChatTab'
 import TasksTab from '@/components/jarvis/mobile/TasksTab'
 import DocsTab from '@/components/jarvis/mobile/DocsTab'
+import CalendarTab from '@/components/jarvis/mobile/CalendarTab'
 import { JARVIS_TEAM, type JarvisMessage } from '@/components/jarvis/jarvisData'
 import { useJarvisWS } from '@/hooks/useJarvisWS'
 import { useJarvisVoice } from '@/hooks/useJarvisVoice'
@@ -127,10 +128,8 @@ export default function JarvisPage() {
     unlock,
   } = useJarvisVoice({
     alwaysOn: false,
-    onReply: (text) => {
-      // Surface the Jarvis voice reply into the WS chat history as well.
-      send(text)
-    },
+    // No onReply callback — voice has its own history (voiceHistoryRef in the hook).
+    // Feeding the reply back into the WS send() would cause an infinite loop.
   })
 
   const messages: JarvisMessage[] = wsMessages.map(m => ({
@@ -189,7 +188,7 @@ export default function JarvisPage() {
             <MobileChatTab />
           </div>
         )}
-        {activeTab === 'calendar' && <ComingSoon label="Calendar" />}
+        {activeTab === 'calendar' && <CalendarTab />}
         {activeTab === 'tasks' && (
           <TasksTab
             tasks={tasks}
