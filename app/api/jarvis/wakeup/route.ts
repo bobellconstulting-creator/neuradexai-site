@@ -8,6 +8,9 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
 const BOT_TOKEN  = process.env.TELEGRAM_BOT_TOKEN
 const CHAT_ID    = process.env.JARVIS_OWNER_CHAT_ID
 const CRON_SECRET = process.env.CRON_SECRET
