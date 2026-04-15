@@ -52,8 +52,34 @@ import {
   completeJarvisTask,
   completeJarvisTaskSchema,
 } from './tools-tasks'
+import {
+  searchWeb,
+  searchWebSchema,
+  fetchUrl,
+  fetchUrlSchema,
+  githubOps,
+  githubOpsSchema,
+  sendTelegramMessage,
+  sendTelegramMessageSchema,
+  systemInfo,
+  systemInfoSchema,
+  vercelDeploy,
+  vercelDeploySchema,
+} from './tools-web'
 
 export {
+  searchWeb,
+  searchWebSchema,
+  fetchUrl,
+  fetchUrlSchema,
+  githubOps,
+  githubOpsSchema,
+  sendTelegramMessage,
+  sendTelegramMessageSchema,
+  systemInfo,
+  systemInfoSchema,
+  vercelDeploy,
+  vercelDeploySchema,
   createFolder,
   writeDoc,
   createFolderSchema,
@@ -1316,6 +1342,42 @@ export const JARVIS_TOOLS: Record<string, ToolEntry> = {
       'Delegate a coding or research task to the local Claude Code CLI. USE ONLY when Bo explicitly asks to use Claude Code. Never auto-trigger. Budget defaults to $0.50, max $2.00.',
     schema: delegateToClaudeCodeSchema,
     run: delegateToClaudeCode,
+  },
+  searchWeb: {
+    name: 'searchWeb',
+    description: 'Search the live web via Tavily. Use for current events, real-time info, research, prices, or anything that may be outside training data. Returns a direct answer plus source snippets.',
+    schema: searchWebSchema,
+    run: searchWeb,
+  },
+  fetchUrl: {
+    name: 'fetchUrl',
+    description: 'Fetch a URL and return its text content. Use to read articles, docs, or any webpage Bo links to.',
+    schema: fetchUrlSchema,
+    run: fetchUrl,
+  },
+  githubOps: {
+    name: 'githubOps',
+    description: "Interact with GitHub: list PRs, list issues, create issues, comment on issues, list repos, get commits. Default repo: bobellconstulting-creator/neuradexai-site.",
+    schema: githubOpsSchema,
+    run: githubOps,
+  },
+  sendTelegramMessage: {
+    name: 'sendTelegramMessage',
+    description: "Send a Telegram message to Bo or the fleet. Defaults to Bo's chat. Use for notifications, alerts, or pinging team agents.",
+    schema: sendTelegramMessageSchema,
+    run: sendTelegramMessage,
+  },
+  systemInfo: {
+    name: 'systemInfo',
+    description: "Get the server's current system status: CPU, memory, uptime, hostname. Use when Bo asks about server health or resource usage.",
+    schema: systemInfoSchema,
+    run: systemInfo,
+  },
+  vercelDeploy: {
+    name: 'vercelDeploy',
+    description: "Trigger a Vercel production deployment for neuradexai. Use when Bo says 'deploy' or 'push to production'.",
+    schema: vercelDeploySchema,
+    run: vercelDeploy,
   },
 }
 

@@ -1,5 +1,5 @@
 {
-  "version": "2026.4.14",
+  "version": "2026.4.15",
   "tools": [
     {
       "name": "postToX",
@@ -331,6 +331,90 @@
           "budgetUsd": { "type": "number", "minimum": 0.01, "maximum": 2.0, "description": "API spend cap in USD. Default 0.50." }
         },
         "required": ["task"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "searchWeb",
+      "description": "Search the live web via Tavily. Use for current events, real-time info, research, prices, or anything outside training data. Returns a direct answer plus source snippets.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "minLength": 1, "maxLength": 400, "description": "Search query" },
+          "count": { "type": "integer", "minimum": 1, "maximum": 10, "description": "Number of results. Default 5.", "default": 5 },
+          "topic": { "type": "string", "enum": ["general", "news"], "description": "'news' for recent events, 'general' otherwise.", "default": "general" }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "fetchUrl",
+      "description": "Fetch a URL and return its text content. Use to read articles, docs, or any webpage Bo links.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "URL to fetch" },
+          "maxChars": { "type": "integer", "minimum": 100, "maximum": 20000, "description": "Max characters to return. Default 4000.", "default": 4000 }
+        },
+        "required": ["url"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "githubOps",
+      "description": "Interact with GitHub: list PRs, list issues, create issues, comment on issues, list repos, get commits. Default repo: bobellconstulting-creator/neuradexai-site.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": { "type": "string", "enum": ["listPRs", "listIssues", "createIssue", "commentOnIssue", "listRepos", "getCommits"], "description": "Action to perform" },
+          "repo": { "type": "string", "description": "Repo in 'owner/name' format. Defaults to bobellconstulting-creator/neuradexai-site." },
+          "title": { "type": "string", "description": "Issue title (createIssue)" },
+          "body": { "type": "string", "description": "Issue body or comment text" },
+          "number": { "type": "integer", "description": "Issue or PR number (commentOnIssue)" },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 30, "description": "Max results. Default 10.", "default": 10 }
+        },
+        "required": ["action"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "sendTelegramMessage",
+      "description": "Send a Telegram message to Bo or the fleet. Defaults to Bo's chat. Use for notifications, alerts, or pinging team agents.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 4000, "description": "Message text. Markdown supported." },
+          "chatId": { "type": "string", "description": "Target chat ID. Defaults to Bo's chat ID." },
+          "bot": { "type": "string", "enum": ["jarvis", "doc"], "description": "Which bot token to use. Default 'jarvis'.", "default": "jarvis" },
+          "parseMode": { "type": "string", "enum": ["Markdown", "HTML", "plain"], "description": "Telegram parse mode. Default Markdown.", "default": "Markdown" }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "systemInfo",
+      "description": "Get the server's current system status: CPU, memory, uptime, hostname. Use when Bo asks about server health or resource usage.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "detail": { "type": "string", "enum": ["summary", "full"], "description": "'summary' for key metrics, 'full' for all OS data.", "default": "summary" }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "vercelDeploy",
+      "description": "Trigger a Vercel production deployment for neuradexai. Use when Bo says 'deploy' or 'push to production'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string", "description": "Vercel project ID. Defaults to neuradexai." },
+          "target": { "type": "string", "enum": ["production", "preview"], "description": "Deployment target. Default production.", "default": "production" }
+        },
+        "required": [],
         "additionalProperties": false
       }
     }
