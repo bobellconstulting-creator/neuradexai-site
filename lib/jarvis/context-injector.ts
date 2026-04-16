@@ -116,6 +116,32 @@ let topicsCache: TopicSummary[] | null = null
 let topicsCachedAt = 0
 const TOPICS_TTL_MS = 10 * 60 * 1000 // 10 min
 
+// ─── Researched topics list ────────────────────────────────────────────────
+
+let topicsListCache: string[] | null = null
+let topicsListCachedAt = 0
+const TOPICS_LIST_TTL_MS = 15 * 60 * 1000 // 15 min
+
+async function loadResearchedTopicsList(): Promise<string[]> {
+  if (topicsListCache !== null && Date.now() - topicsListCachedAt < TOPICS_LIST_TTL_MS) {
+    return topicsListCache
+  }
+  try {
+    const entries = await readdir(TOPICS_DIR, { withFileTypes: true })
+    const slugs = entries
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .sort()
+    topicsListCache = slugs
+    topicsListCachedAt = Date.now()
+    return slugs
+  } catch {
+    topicsListCache = []
+    topicsListCachedAt = Date.now()
+    return []
+  }
+}
+
 async function loadRecentTopics(): Promise<TopicSummary[]> {
   if (topicsCache !== null && Date.now() - topicsCachedAt < TOPICS_TTL_MS) return topicsCache
 
@@ -172,6 +198,7 @@ interface VaultCache {
   instincts: PersistedInstinct[]
   dailies: Array<{ date: string; content: string }>
   topics: TopicSummary[]
+  knownTopics: string[]
   fetchedAt: number
 }
 
@@ -181,13 +208,14 @@ async function getVaultCached(): Promise<VaultCache> {
   if (vaultCache && Date.now() - vaultCache.fetchedAt < VAULT_CACHE_TTL_MS) {
     return vaultCache
   }
-  const [bo, instincts, dailies, topics] = await Promise.all([
+  const [bo, instincts, dailies, topics, knownTopics] = await Promise.all([
     readBoProfile(),
     listPromotedInstincts(TOP_INSTINCTS),
     listRecentDailyNotes(RECENT_DAILIES),
     loadRecentTopics(),
+    loadResearchedTopicsList(),
   ])
-  vaultCache = { bo, instincts, dailies, topics, fetchedAt: Date.now() }
+  vaultCache = { bo, instincts, dailies, topics, knownTopics, fetchedAt: Date.now() }
   return vaultCache
 }
 
@@ -398,6 +426,15 @@ function renderTopics(topics: TopicSummary[]): string {
   return `## Recently Learned Topics (from vault research)\n${blocks.join('\n\n')}`
 }
 
+function renderKnownTopics(slugs: string[]): string {
+  if (slugs.length === 0) return ''
+  const header = `## Topics Already in Vault (searchKnowledge before learnTopic)\n`
+  const list = slugs.join(', ')
+  const full = header + list
+  if (full.length > 600) return full.slice(0, 600)
+  return full
+}
+
 function renderDailies(items: Array<{ date: string; content: string }>): string {
   if (items.length === 0) return ''
   const blocks = items.map(({ date, content }) => `### ${date}\n${content.trim()}`)
@@ -410,15 +447,19 @@ function renderDailies(items: Array<{ date: string; content: string }>): string 
  * Drop oldest daily notes first, then lowest-confidence instincts, until the
  * full memory section fits within MEMORY_TOKEN_BUDGET tokens.
  */
+const KNOWN_TOPICS_TOKEN_BUDGET = 150
+
 function fitToBudget(
   bo: string,
   instincts: PersistedInstinct[],
   dailies: Array<{ date: string; content: string }>,
   topics: TopicSummary[] = [],
+  knownTopics: string[] = [],
 ): string {
   let workingDailies = [...dailies]
   let workingInstincts = [...instincts]
   let workingTopics = [...topics]
+  let workingKnownTopics = [...knownTopics]
 
   const compose = (): string => {
     const sections = [
@@ -426,6 +467,7 @@ function fitToBudget(
       renderBo(bo),
       renderDailies(workingDailies),
       renderTopics(workingTopics),
+      renderKnownTopics(workingKnownTopics),
     ].filter(Boolean)
     return sections.join('\n\n')
   }
@@ -433,7 +475,12 @@ function fitToBudget(
   let composed = compose()
 
   while (approxTokens(composed) > MEMORY_TOKEN_BUDGET) {
-    if (workingTopics.length > 0) {
+    if (workingKnownTopics.length > 0 && approxTokens(renderKnownTopics(workingKnownTopics)) > KNOWN_TOPICS_TOKEN_BUDGET) {
+      // Trim slug list toward the 150-token budget
+      workingKnownTopics = workingKnownTopics.slice(0, Math.floor(workingKnownTopics.length * 0.75))
+    } else if (workingKnownTopics.length > 0) {
+      workingKnownTopics = []
+    } else if (workingTopics.length > 0) {
       workingTopics.pop() // drop oldest topic first (cheapest to lose)
     } else if (workingDailies.length > 0) {
       workingDailies.pop() // drop the oldest daily note
@@ -477,7 +524,7 @@ export async function buildJarvisSystemPrompt(): Promise<string> {
   // Choose the anchor: full SOUL on day-start, lean primary.md otherwise.
   const anchor = freshDay ? await loadSoul() : await loadPrimaryMd()
 
-  const memorySection = fitToBudget(vault.bo, vault.instincts, vault.dailies, vault.topics)
+  const memorySection = fitToBudget(vault.bo, vault.instincts, vault.dailies, vault.topics, vault.knownTopics)
 
   const parts: string[] = [anchor]
 

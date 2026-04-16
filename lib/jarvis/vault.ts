@@ -15,6 +15,7 @@ import {
   type CognitivePattern,
   type Instinct,
   type PersistedInstinct,
+  type ReflectionResult,
   PersistedInstinctSchema,
 } from './types'
 
@@ -329,6 +330,98 @@ export async function promoteInstinct(instinct: Instinct): Promise<{
   }
 
   return { promoted: targetPromoted, path: targetPath, changed: true }
+}
+
+// ─── Reflection persistence ────────────────────────────────────────────────
+
+/**
+ * Persist a ReflectionResult to the vault.
+ *
+ * Non-throwing: all errors are logged and swallowed so the caller's
+ * .catch() is the only handler needed.
+ */
+export async function persistReflectionResult(result: ReflectionResult): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+
+  const tasks: Promise<unknown>[] = []
+
+  // Preferences → instincts
+  for (const pref of result.preferences) {
+    const instinct: Instinct = {
+      kind: 'preference',
+      title: pref.about,
+      body: `${pref.kind}: ${pref.detail}`,
+      confidence: pref.confidence,
+      source: 'reflection',
+    }
+    tasks.push(promoteInstinct(instinct).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn('[vault] persistReflectionResult preference failed:', (e as Error).message?.slice(0, 80))
+    }))
+  }
+
+  // Mistakes → instincts
+  for (const m of result.mistakes) {
+    const instinct: Instinct = {
+      kind: 'mistake',
+      title: m.mistake.slice(0, 80),
+      body: `Avoid: ${m.avoidance}`,
+      confidence: m.confidence,
+      source: 'reflection',
+    }
+    tasks.push(promoteInstinct(instinct).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn('[vault] persistReflectionResult mistake failed:', (e as Error).message?.slice(0, 80))
+    }))
+  }
+
+  // Decisions → instincts (confidence >= 0.7 only)
+  for (const d of result.decisions) {
+    if (d.confidence < 0.7) continue
+    const instinct: Instinct = {
+      kind: 'decision',
+      title: d.decision.slice(0, 80),
+      body: d.rationale,
+      confidence: d.confidence,
+      source: 'reflection',
+    }
+    tasks.push(promoteInstinct(instinct).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn('[vault] persistReflectionResult decision failed:', (e as Error).message?.slice(0, 80))
+    }))
+  }
+
+  // Cognitive patterns (confidence >= 0.6)
+  const strongPatterns = result.cognitivePatterns.filter((cp) => cp.confidence >= 0.6)
+  if (strongPatterns.length > 0) {
+    tasks.push(updateCognitivePatterns(strongPatterns).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn('[vault] persistReflectionResult cognitivePatterns failed:', (e as Error).message?.slice(0, 80))
+    }))
+  }
+
+  // Facts → bo profile
+  if (result.facts.length > 0) {
+    const deltas: ProfileDelta[] = result.facts.map((f) => ({
+      field: f.field,
+      value: f.value,
+      confidence: f.confidence,
+    }))
+    tasks.push(updateBoProfile(deltas).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn('[vault] persistReflectionResult facts failed:', (e as Error).message?.slice(0, 80))
+    }))
+  }
+
+  // Summary → daily note (only if meaningful)
+  if (result.summary.length > 20) {
+    tasks.push(appendDaily(today, result.summary).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.warn('[vault] persistReflectionResult summary failed:', (e as Error).message?.slice(0, 80))
+    }))
+  }
+
+  await Promise.all(tasks)
 }
 
 // ─── Read-side ─────────────────────────────────────────────────────────────

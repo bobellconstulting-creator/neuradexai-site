@@ -8,6 +8,10 @@
     {
       "path": "/api/jarvis/task-runner",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/jarvis/instinct-review",
+      "schedule": "0 4 * * *"
     }
   ]
 }

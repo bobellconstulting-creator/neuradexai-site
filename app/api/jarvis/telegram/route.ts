@@ -29,6 +29,7 @@ import {
 import { appendTurn, getHistory, type Turn } from '@/lib/jarvis/conversation'
 import { reflect } from '@/lib/jarvis/reflector'
 import { invalidateMemoryCache } from '@/lib/jarvis/context-injector'
+import { persistReflectionResult } from '@/lib/jarvis/vault'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -354,7 +355,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         if (message && result.reply) {
           const transcript = `Bo: ${message}\n\nJarvis: ${replyWithAudit}`
           reflect(transcript)
-            .then(() => { invalidateMemoryCache() })
+            .then(async (result) => {
+              await persistReflectionResult(result)
+              invalidateMemoryCache()
+            })
             .catch((e) => {
               // eslint-disable-next-line no-console
               console.warn('[jarvis/telegram] auto-reflect failed:', errMsg(e).slice(0, 80))
