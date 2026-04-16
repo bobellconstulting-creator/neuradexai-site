@@ -422,6 +422,9 @@ export async function persistReflectionResult(result: ReflectionResult): Promise
   }
 
   await Promise.all(tasks)
+
+  // Proactive pattern check — fire and forget
+  import('./proactive').then(m => m.checkAndTriggerPatterns(result)).catch(() => {})
 }
 
 // ─── Read-side ─────────────────────────────────────────────────────────────

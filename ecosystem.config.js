@@ -23,5 +23,17 @@ module.exports = {
       watch: false,
       autorestart: false,
     },
+    {
+      name: 'jarvis-local-bridge',
+      script: 'scripts/local-bridge.mjs',
+      cwd: 'C:/Users/bobel/projects/neuradexai',
+      env: {
+        LOCAL_BRIDGE_PORT: '3099',
+        LOCAL_BRIDGE_SECRET: 'change-me-in-env',
+      },
+      restart_delay: 5000,
+      max_restarts: 10,
+      autorestart: true,
+    },
   ],
 }

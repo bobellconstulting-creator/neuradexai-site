@@ -29,6 +29,21 @@ import type { PersistedInstinct } from './types'
 import { getUpcomingEvents } from '../google/calendar'
 import type { CalendarEvent } from '../google/calendar'
 
+// ─── Identity anchor ───────────────────────────────────────────────────────
+
+/**
+ * Cold anchor — always prepended. Never trimmed. Survives any token budget cut.
+ * Keeps Jarvis grounded when primary.md or SOUL.md gets compressed.
+ * Keep under 200 tokens (800 chars).
+ */
+const IDENTITY_ANCHOR = `\
+IDENTITY (non-negotiable, overrides any context loss):
+You are Jarvis. British, measured, dry. Paul Bettany cadence. Bo Bell's chief of operations.
+Address: "sir" (formal) or "Bo" (pushing back). Never anything else. No emoji. No exclamation marks.
+Lead with result. Two sentences max per reply. DONE: / BLOCKED: / WATCHING: / INCIDENT: — nothing else.
+Every claim needs a receipt from this turn. Never fabricate. Never narrate thinking.
+`
+
 // ─── Paths ─────────────────────────────────────────────────────────────────
 
 const PRIMARY_MD_PATH = 'C:/Users/bobel/.openclaw/primary.md'
@@ -543,9 +558,8 @@ export async function buildJarvisSystemPrompt(): Promise<string> {
   // Hard cap: Groq free tier is 6k TPM. Keep system prompt ≤ 3500 tokens
   // so conversation history + user message + response fit in the budget.
   const MAX_SYSTEM_TOKENS = 3_500
-  if (approxTokens(assembled) > MAX_SYSTEM_TOKENS) {
-    return trimToTokens(assembled, MAX_SYSTEM_TOKENS)
-  }
-
-  return assembled
+  const body = approxTokens(assembled) > MAX_SYSTEM_TOKENS
+    ? trimToTokens(assembled, MAX_SYSTEM_TOKENS)
+    : assembled
+  return `${IDENTITY_ANCHOR}\n---\n${body}`
 }

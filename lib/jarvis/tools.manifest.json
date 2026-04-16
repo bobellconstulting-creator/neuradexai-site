@@ -443,6 +443,19 @@
         "required": ["topic"],
         "additionalProperties": false
       }
+    },
+    {
+      "name": "localBridgeExec",
+      "description": "Execute a shell command on Bo's local machine via the local bridge server. Use when shellExec is BLOCKED on Vercel. Requires LOCAL_BRIDGE_URL and LOCAL_BRIDGE_SECRET env vars to be set.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cmd": { "type": "string", "maxLength": 500, "description": "Shell command to run on Bo's local machine." },
+          "timeout": { "type": "number", "description": "Timeout in seconds. Default 30, max 120." }
+        },
+        "required": ["cmd"],
+        "additionalProperties": false
+      }
     }
   ]
 }

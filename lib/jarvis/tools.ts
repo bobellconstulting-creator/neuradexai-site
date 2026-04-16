@@ -343,6 +343,12 @@ export const createAccountSchema = z.object({
 })
 export type CreateAccountArgs = z.infer<typeof createAccountSchema>
 
+export const localBridgeExecSchema = z.object({
+  cmd: z.string().max(500).describe('Shell command to run on Bo\'s local machine'),
+  timeout: z.number().optional().describe('Timeout in seconds, default 30'),
+})
+export type LocalBridgeExecArgs = z.infer<typeof localBridgeExecSchema>
+
 // ──────────────────────────────────────────────────────────────────────────
 // Tool implementations
 // ──────────────────────────────────────────────────────────────────────────
@@ -455,27 +461,11 @@ export async function shellExec(raw: unknown): Promise<ToolResult<SpawnResult>> 
     await appendReceipt(r)
     return { ok: false, error: parsed.error.message, receipt: r }
   }
-  const { command, cwd, timeoutMs } = parsed.data
-  // Use bash on POSIX, cmd.exe /c on Windows. Both accept a single string.
-  const isWin = process.platform === 'win32'
-  const shellBin = isWin ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh'
-  const shellArgs = isWin ? ['/d', '/s', '/c', command] : ['-c', command]
-  const res = await runChild(shellBin, shellArgs, { cwd, timeoutMs })
-  const ok = res.code === 0 && !res.timedOut
-  const r = mkReceipt(
-    'shellExec',
-    ok,
-    `cmd="${command.slice(0, 60)}" code=${res.code}${res.timedOut ? ' TIMEOUT' : ''}`
-  )
+  const blockedMsg =
+    'BLOCKED: shellExec requires local gateway execution. Use the OpenClaw gateway at port 18789 or the local bridge. Cannot run on Vercel serverless.'
+  const r = mkReceipt('shellExec', false, blockedMsg)
   await appendReceipt(r)
-  return ok
-    ? { ok, result: res, receipt: r }
-    : {
-        ok,
-        result: res,
-        error: res.stderr || (res.timedOut ? 'timeout' : `exit ${res.code}`),
-        receipt: r,
-      }
+  return { ok: false, result: undefined, receipt: r }
 }
 
 // Shared playwright runner. Lazy-imports so the Next.js edge bundle never
@@ -531,86 +521,11 @@ export async function browserLogin(raw: unknown): Promise<ToolResult<{ finalUrl:
     await appendReceipt(r)
     return { ok: false, error: parsed.error.message, receipt: r }
   }
-  const {
-    url,
-    usernameSelector,
-    passwordSelector,
-    username,
-    password,
-    submitSelector,
-    twoFactorHook,
-    telegramChatId,
-  } = parsed.data
-
-  let closeAll: (() => Promise<void>) | null = null
-  try {
-    const { page, closeAll: close } = await launchProfile()
-    closeAll = close
-    // Use `any` only at this boundary because playwright's page type is huge
-    // and would force the entire file to import the types. The schema above
-    // is what guards runtime safety.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const p = page as any
-    await p.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 })
-    await p.waitForTimeout(2_000)
-    await p.fill(usernameSelector, username, { timeout: 15_000 })
-    await p.fill(passwordSelector, password, { timeout: 15_000 })
-    if (submitSelector) {
-      await p.click(submitSelector, { timeout: 15_000 })
-    } else {
-      await p.keyboard.press('Enter')
-    }
-    await p.waitForTimeout(4_000)
-
-    if (twoFactorHook) {
-      // Heuristic: if URL still contains login path or a 2fa field appears,
-      // page Bo and wait up to 3 minutes for him to reply "ok" in Telegram.
-      const urlNow: string = p.url()
-      if (/2fa|otp|verify|challenge|login/i.test(urlNow)) {
-        if (telegramChatId && process.env.TELEGRAM_BOT_TOKEN) {
-          try {
-            await fetch(
-              `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  chat_id: telegramChatId,
-                  text: `Jarvis paused on 2FA at ${urlNow}. Reply /resume when cleared.`,
-                }),
-              }
-            )
-          } catch {
-            // non-fatal
-          }
-        }
-        // poll for 3 minutes
-        const deadline = Date.now() + 180_000
-        while (Date.now() < deadline) {
-          await p.waitForTimeout(5_000)
-          if (!/2fa|otp|verify|challenge|login/i.test(p.url())) break
-        }
-      }
-    }
-
-    const finalUrl: string = p.url()
-    const ok = !/login|signin/i.test(finalUrl)
-    const receipt = mkReceipt(
-      'browserLogin',
-      ok,
-      `url=${url} final=${finalUrl}`
-    )
-    await appendReceipt(receipt)
-    return ok
-      ? { ok, result: { finalUrl }, receipt }
-      : { ok, result: { finalUrl }, error: `still on login-like URL: ${finalUrl}`, receipt }
-  } catch (err) {
-    const receipt = mkReceipt('browserLogin', false, getErrorMessage(err))
-    await appendReceipt(receipt)
-    return { ok: false, error: getErrorMessage(err), receipt }
-  } finally {
-    if (closeAll) await closeAll()
-  }
+  const blockedMsg =
+    'BLOCKED: browserLogin requires local gateway execution. Use the OpenClaw gateway at port 18789 or the local bridge. Cannot run on Vercel serverless.'
+  const r = mkReceipt('browserLogin', false, blockedMsg)
+  await appendReceipt(r)
+  return { ok: false, result: undefined, receipt: r }
 }
 
 /**
@@ -627,110 +542,11 @@ export async function createAccount(
     await appendReceipt(r)
     return { ok: false, error: parsed.error.message, receipt: r }
   }
-  const { service, email, username, password, signupUrl, fieldSelectors, telegramChatId } =
-    parsed.data
-
-  const serviceDefaults: Record<
-    string,
-    { url: string; email: string; username?: string; password: string; submit: string }
-  > = {
-    x: {
-      url: 'https://x.com/i/flow/signup',
-      email: 'input[name="email"]',
-      password: 'input[name="password"]',
-      submit: 'button[role="button"][data-testid*="Next"]',
-    },
-    tiktok: {
-      url: 'https://www.tiktok.com/signup',
-      email: 'input[name="email"]',
-      username: 'input[name="username"]',
-      password: 'input[type="password"]',
-      submit: 'button[type="submit"]',
-    },
-    generic: {
-      url: signupUrl ?? '',
-      email: fieldSelectors?.email ?? 'input[type="email"]',
-      username: fieldSelectors?.username ?? 'input[name="username"]',
-      password: fieldSelectors?.password ?? 'input[type="password"]',
-      submit: fieldSelectors?.submit ?? 'button[type="submit"]',
-    },
-  }
-
-  const cfg = serviceDefaults[service]
-  if (service === 'generic' && !signupUrl) {
-    const r = mkReceipt('createAccount', false, 'generic service requires signupUrl')
-    await appendReceipt(r)
-    return { ok: false, error: 'generic service requires signupUrl', receipt: r }
-  }
-
-  let closeAll: (() => Promise<void>) | null = null
-  try {
-    const { page, closeAll: close } = await launchProfile()
-    closeAll = close
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const p = page as any
-    await p.goto(cfg.url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
-    await p.waitForTimeout(3_000)
-
-    await p.fill(cfg.email, email, { timeout: 15_000 }).catch(() => {})
-    if (cfg.username) {
-      await p.fill(cfg.username, username, { timeout: 15_000 }).catch(() => {})
-    }
-    await p.fill(cfg.password, password, { timeout: 15_000 }).catch(() => {})
-
-    // Save credentials BEFORE clicking submit, so we keep a record even if
-    // the signup flow is interrupted by CAPTCHA.
-    await fs.mkdir(path.dirname(ACCOUNTS_FILE), { recursive: true })
-    const line = `# ${now()} ${service}\n${service.toUpperCase()}_${username.toUpperCase()}_EMAIL=${email}\n${service.toUpperCase()}_${username.toUpperCase()}_USER=${username}\n${service.toUpperCase()}_${username.toUpperCase()}_PASS=${password}\n`
-    await fs.appendFile(ACCOUNTS_FILE, line, 'utf8')
-
-    await p.click(cfg.submit, { timeout: 15_000 }).catch(() => {})
-    await p.waitForTimeout(5_000)
-
-    // CAPTCHA / challenge detection — pause, page Bo, stop. Do NOT auto-solve.
-    const htmlSnippet: string = await p.content().then((c: string) => c.slice(0, 8_000))
-    const needsHuman = /captcha|recaptcha|hcaptcha|verify.?you.?are.?human/i.test(htmlSnippet)
-    if (needsHuman && telegramChatId && process.env.TELEGRAM_BOT_TOKEN) {
-      try {
-        await fetch(
-          `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: telegramChatId,
-              text: `Jarvis blocked on CAPTCHA at ${p.url()} during ${service} signup for @${username}. Solve manually.`,
-            }),
-          }
-        )
-      } catch {
-        // non-fatal
-      }
-    }
-
-    const finalUrl: string = p.url()
-    const ok = !needsHuman && !/signup|signin|login/i.test(finalUrl)
-    const receipt = mkReceipt(
-      'createAccount',
-      ok,
-      `service=${service} user=${username} needsHuman=${needsHuman} final=${finalUrl}`
-    )
-    await appendReceipt(receipt)
-    return ok
-      ? { ok, result: { service, username, finalUrl }, receipt }
-      : {
-          ok,
-          result: { service, username, finalUrl },
-          error: needsHuman ? 'CAPTCHA — human required' : `still on signup-like URL: ${finalUrl}`,
-          receipt,
-        }
-  } catch (err) {
-    const receipt = mkReceipt('createAccount', false, getErrorMessage(err))
-    await appendReceipt(receipt)
-    return { ok: false, error: getErrorMessage(err), receipt }
-  } finally {
-    if (closeAll) await closeAll()
-  }
+  const blockedMsg =
+    'BLOCKED: createAccount requires local gateway execution. Use the OpenClaw gateway at port 18789 or the local bridge. Cannot run on Vercel serverless.'
+  const r = mkReceipt('createAccount', false, blockedMsg)
+  await appendReceipt(r)
+  return { ok: false, result: undefined, receipt: r }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -898,106 +714,13 @@ export async function speak(raw: unknown): Promise<ToolResult<SpeakResult>> {
   }
   // ── /ElevenLabs path ─────────────────────────────────────────────────────
 
-  const voiceFile = PIPER_VOICES[voice as 'alan']
-  if (!voiceFile) {
-    const r = mkReceipt('speak', false, `unknown voice alias: ${voice}`)
-    await appendReceipt(r)
-    return { ok: false, error: `unknown voice alias: ${voice}`, receipt: r }
-  }
-  const modelPath = path.join(PIPER_VOICES_DIR, voiceFile)
-  try {
-    await fs.access(modelPath)
-  } catch {
-    const r = mkReceipt('speak', false, `voice model missing: ${modelPath}`)
-    await appendReceipt(r)
-    return { ok: false, error: `voice model missing: ${modelPath}`, receipt: r }
-  }
-
-  await fs.mkdir(SPEECH_OUT_DIR, { recursive: true })
-  const finalPath =
-    outPath && outPath.length > 0
-      ? outPath
-      : path.join(SPEECH_OUT_DIR, `${Date.now()}.wav`)
-  await fs.mkdir(path.dirname(finalPath), { recursive: true })
-
-  // Spawn piper, pipe text via stdin. Piper is chatty on stderr — that's fine.
-  const spawnRes: SpawnResult = await new Promise((resolve) => {
-    const child = spawn(
-      PIPER_EXE,
-      ['--model', modelPath, '--output_file', finalPath],
-      { shell: false, windowsHide: true }
-    )
-    let stdout = ''
-    let stderr = ''
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      try {
-        child.kill('SIGKILL')
-      } catch {
-        // ignore
-      }
-    }, 60_000)
-    child.stdout.on('data', (d: Buffer) => {
-      stdout += d.toString('utf8')
-    })
-    child.stderr.on('data', (d: Buffer) => {
-      stderr += d.toString('utf8')
-    })
-    child.on('error', (err) => {
-      stderr += '\nSPAWN_ERROR: ' + getErrorMessage(err)
-    })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      resolve({ code, stdout: truncate(stdout), stderr: truncate(stderr), timedOut })
-    })
-    child.stdin.write(text)
-    child.stdin.end()
-  })
-
-  if (spawnRes.code !== 0 || spawnRes.timedOut) {
-    const receipt = mkReceipt(
-      'speak',
-      false,
-      `piper exit=${spawnRes.code}${spawnRes.timedOut ? ' TIMEOUT' : ''} stderr=${spawnRes.stderr.slice(0, 120)}`
-    )
-    await appendReceipt(receipt)
-    return {
-      ok: false,
-      error: spawnRes.stderr || (spawnRes.timedOut ? 'piper timeout' : `piper exit ${spawnRes.code}`),
-      receipt,
-    }
-  }
-
-  let sizeBytes = 0
-  try {
-    const st = await fs.stat(finalPath)
-    sizeBytes = st.size
-  } catch {
-    // fall through
-  }
-  const durationMs = await wavDurationMs(finalPath)
-
-  let telegram: SpeakResult['telegram']
-  if (sendToTelegram) {
-    const chatId = telegramChatId ?? TELEGRAM_DEFAULT_CHAT_ID
-    telegram = await sendTelegramVoice(finalPath, chatId)
-  }
-
-  const receipt = mkReceipt(
-    'speak',
-    true,
-    `voice=${voice} path=${finalPath} size=${sizeBytes} durMs=${durationMs}${
-      telegram ? ` tg=${telegram.sent ? telegram.method : 'fail:' + telegram.error} ` : ''
-    }text="${text.slice(0, 40)}"`
-  )
-  await appendReceipt(receipt)
-
-  return {
-    ok: true,
-    result: { path: finalPath, durationMs, sizeBytes, voice, telegram },
-    receipt,
-  }
+  // Piper TTS requires spawning a local .exe and writing to local disk —
+  // neither is possible on Vercel serverless.
+  const blockedMsg =
+    'BLOCKED: speak (Piper TTS) requires local gateway execution. Use the OpenClaw gateway at port 18789 or the local bridge. Cannot run on Vercel serverless.'
+  const r = mkReceipt('speak', false, blockedMsg)
+  await appendReceipt(r)
+  return { ok: false, result: undefined, receipt: r }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1058,96 +781,11 @@ export async function listen(raw: unknown): Promise<ToolResult<ListenResult>> {
     await appendReceipt(r)
     return { ok: false, error: parsed.error.message, receipt: r }
   }
-
-  const { audioPath, language, model } = parsed.data
-  const useModel = model || WHISPER_DEFAULT_MODEL
-
-  // Verify the audio file exists before spawning python — cheap fail-fast.
-  try {
-    await fs.access(audioPath)
-  } catch {
-    const r = mkReceipt('listen', false, `audio missing: ${audioPath}`)
-    await appendReceipt(r)
-    return { ok: false, error: `audio file not found: ${audioPath}`, receipt: r }
-  }
-
-  // Verify the python helper exists.
-  try {
-    await fs.access(WHISPER_SCRIPT)
-  } catch {
-    const r = mkReceipt('listen', false, `whisper helper missing: ${WHISPER_SCRIPT}`)
-    await appendReceipt(r)
-    return {
-      ok: false,
-      error: `whisper helper missing: ${WHISPER_SCRIPT}. Reinstall with: py -m pip install --user faster-whisper`,
-      receipt: r,
-    }
-  }
-
-  const args = [WHISPER_SCRIPT, '--audio', audioPath, '--model', useModel]
-  if (language) args.push('--language', language)
-
-  // runChild merges this with process.env internally, but the strict
-  // ProcessEnv shape requires NODE_ENV-style keys. Cast at the boundary.
-  const res = await runChild(PYTHON_BIN, args, {
-    cwd: WHISPER_DIR,
-    timeoutMs: 180_000,
-    env: { WHISPER_MODEL_DIR } as unknown as NodeJS.ProcessEnv,
-  })
-
-  if (res.timedOut) {
-    const r = mkReceipt('listen', false, `whisper TIMEOUT model=${useModel} audio=${path.basename(audioPath)}`)
-    await appendReceipt(r)
-    return { ok: false, error: 'whisper transcription timeout (180s)', receipt: r }
-  }
-
-  const payload = parseWhisperStdout(res.stdout || '')
-  if (!payload) {
-    const stderrTail = (res.stderr || '').slice(-400)
-    const r = mkReceipt(
-      'listen',
-      false,
-      `whisper bad json exit=${res.code} stderr=${stderrTail.slice(0, 120)}`
-    )
-    await appendReceipt(r)
-    return {
-      ok: false,
-      error: `whisper produced no parseable JSON (exit ${res.code}). stderr=${stderrTail}`,
-      receipt: r,
-    }
-  }
-
-  if (payload.ok === false) {
-    const r = mkReceipt('listen', false, `whisper error: ${payload.error.slice(0, 120)}`)
-    await appendReceipt(r)
-    return { ok: false, error: payload.error, receipt: r }
-  }
-
-  // Compute mean logprob across segments as a confidence proxy.
-  const logprobs = payload.segments.map((s) => s.avg_logprob)
-  const confidence =
-    logprobs.length > 0 ? logprobs.reduce((a, b) => a + b, 0) / logprobs.length : -1
-
-  const result: ListenResult = {
-    text: payload.text,
-    language: payload.language,
-    languageProbability: payload.languageProbability,
-    durationSec: payload.durationSec,
-    durationMs: Math.round(payload.durationSec * 1000),
-    elapsedMs: payload.elapsedMs,
-    model: payload.model,
-    confidence: Math.round(confidence * 10000) / 10000,
-    segments: payload.segments,
-  }
-
-  const receipt = mkReceipt(
-    'listen',
-    true,
-    `model=${useModel} lang=${payload.language} audioMs=${result.durationMs} elapsedMs=${result.elapsedMs} conf=${result.confidence} text="${payload.text.slice(0, 60)}"`
-  )
-  await appendReceipt(receipt)
-
-  return { ok: true, result, receipt }
+  const blockedMsg =
+    'BLOCKED: listen (Whisper STT) requires local gateway execution. Use the OpenClaw gateway at port 18789 or the local bridge. Cannot run on Vercel serverless.'
+  const r = mkReceipt('listen', false, blockedMsg)
+  await appendReceipt(r)
+  return { ok: false, result: undefined, receipt: r }
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1272,6 +910,47 @@ export async function getCalendar(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     const r = mkReceipt('getCalendar', false, msg)
+    await appendReceipt(r)
+    return { ok: false, error: msg, receipt: r }
+  }
+}
+
+export async function localBridgeExec(args: unknown): Promise<ToolResult> {
+  const parsed = localBridgeExecSchema.safeParse(args)
+  if (!parsed.success) {
+    const r = mkReceipt('localBridgeExec', false, 'invalid args: ' + parsed.error.message)
+    await appendReceipt(r)
+    return { ok: false, error: parsed.error.message, receipt: r }
+  }
+  const { cmd, timeout } = parsed.data
+  const bridgeUrl = process.env.LOCAL_BRIDGE_URL
+  const secret = process.env.LOCAL_BRIDGE_SECRET
+  if (!bridgeUrl || !secret) {
+    const msg = 'BLOCKED: LOCAL_BRIDGE_URL or LOCAL_BRIDGE_SECRET not configured. Bridge server must be running locally and URL set in Vercel env vars.'
+    const r = mkReceipt('localBridgeExec', false, msg)
+    await appendReceipt(r)
+    return { ok: false, result: null, receipt: r }
+  }
+  try {
+    const res = await fetch(`${bridgeUrl}/exec`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ cmd, timeout }),
+      signal: AbortSignal.timeout(((timeout ?? 30) * 1000) + 5_000),
+    })
+    if (!res.ok) {
+      const msg = `BLOCKED: bridge returned ${res.status}`
+      const r = mkReceipt('localBridgeExec', false, msg)
+      await appendReceipt(r)
+      return { ok: false, result: null, receipt: r }
+    }
+    const data = await res.json() as { exitCode: number; stdout: string; stderr: string }
+    const receipt = mkReceipt('localBridgeExec', data.exitCode === 0, `exit ${data.exitCode} | stdout: ${String(data.stdout).slice(0, 300)}`)
+    await appendReceipt(receipt)
+    return { ok: data.exitCode === 0, result: data, receipt }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    const r = mkReceipt('localBridgeExec', false, msg)
     await appendReceipt(r)
     return { ok: false, error: msg, receipt: r }
   }
@@ -1473,6 +1152,12 @@ export const JARVIS_TOOLS: Record<string, ToolEntry> = {
     description: "Trigger a Vercel production deployment for neuradexai. Use when Bo says 'deploy' or 'push to production'.",
     schema: vercelDeploySchema,
     run: vercelDeploy,
+  },
+  localBridgeExec: {
+    name: 'localBridgeExec',
+    description: "Execute a shell command on Bo's local machine via the local bridge server. Use when shellExec is BLOCKED on Vercel. Requires LOCAL_BRIDGE_URL and LOCAL_BRIDGE_SECRET env vars.",
+    schema: localBridgeExecSchema,
+    run: localBridgeExec,
   },
 }
 
