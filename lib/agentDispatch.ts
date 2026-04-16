@@ -69,8 +69,8 @@ const AGENT_PORTS: Record<string, number> = {
 
 const CONTEXT_WINDOW = 20                              // last N messages shown to agents
 const GEMINI_MODEL = 'gemini-2.5-flash'                // primary for fleet agents
-// Groq models tried in order — 70b first, then Kimi K2 (128k context, avoids 8b size limit)
-const GROQ_MODELS = ['llama-3.3-70b-versatile', 'moonshotai/kimi-k2-instruct'] as const
+// Groq models tried in order — 70b versatile (free, 32k context, tool-capable)
+const GROQ_MODELS = ['llama-3.3-70b-versatile'] as const
 // Fireworks fallback — function calling via firefunction-v2
 const FIREWORKS_MODEL = 'accounts/fireworks/models/firefunction-v2'
 // NVIDIA fallback — Nemotron (confirmed working, text-only, no native tool calling)
@@ -637,7 +637,14 @@ export async function dispatchAgent(
       const transcript = renderHistory(history)
       const userText = `COMMUNAL CHANNEL TRANSCRIPT (most recent last):\n${transcript}\n\nYou are ${agent.displayName}. Respond as yourself to the latest message in this channel. If the latest message is not addressed to you and does not need your input, reply with the single token: SILENCE`
       const jarvisHistory: JarvisMessage[] = [] // state lives in the rendered transcript for this caller
-      const result = await runJarvisTurn(systemPrompt, userText, jarvisHistory)
+      const JARVIS_TIMEOUT_MS = 25_000
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+      const result = await Promise.race([
+        runJarvisTurn(systemPrompt, userText, jarvisHistory).finally(() => clearTimeout(timeoutHandle)),
+        new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error('jarvis turn timeout')), JARVIS_TIMEOUT_MS)
+        }),
+      ])
       const toolCalls: ToolCall[] = result.toolCalls.map((t) => ({
         name: t.name,
         args: t.argsSummary,

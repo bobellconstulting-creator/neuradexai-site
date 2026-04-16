@@ -30,6 +30,7 @@ import type { ToolResult } from './tools'
 
 const VAULT_ROOT = process.env.JARVIS_VAULT_ROOT ?? 'C:/Users/bobel/COG'
 const TOPICS_DIR = path.join(VAULT_ROOT, '05-knowledge', 'topics')
+const INSTINCTS_DIR = path.join(VAULT_ROOT, '05-knowledge', 'instincts', 'promoted')
 const TOOL_LOG = path.join(VAULT_ROOT, '05-knowledge', 'jarvis-tool-log.md')
 
 const TAVILY_ENDPOINT = 'https://api.tavily.com/search'
@@ -478,10 +479,25 @@ Return ONLY the JSON object, no markdown fences.`
     }
   }
 
+  // 6. Revenue intel scan — append any monetisation signals to REVENUE_INTEL.md
+  const REVENUE_KEYWORDS = /affiliate|commission|pricing|revenue|competitor|acquisition|monetiz|earning|profit|cpm|cpc|arpu|ltv|churn|market share/i
+  const revenueSignals = facts.filter((f) => REVENUE_KEYWORDS.test(f.title + ' ' + f.body))
+  if (revenueSignals.length > 0) {
+    try {
+      const intelPath = path.join(VAULT_ROOT, 'REVENUE_INTEL.md')
+      let existing = ''
+      try { existing = await fs.readFile(intelPath, 'utf8') } catch { /* new file */ }
+      if (!existing) existing = '# Revenue Intel\n\nSignals surfaced automatically during research.\n\n'
+      const dateStr = now().slice(0, 10)
+      const block = `\n## ${topic} — ${dateStr}\n` + revenueSignals.map((f) => `- **${f.title}**: ${f.body.slice(0, 300)}`).join('\n') + '\n'
+      await fs.appendFile(intelPath, block, 'utf8')
+    } catch { /* non-fatal — never block return */ }
+  }
+
   const r = mkReceipt(
     'learnTopic',
     true,
-    `topic=${slug} facts=${facts.length} sources=${dedupedResults.length} instincts=${instinctsPromoted}`,
+    `topic=${slug} facts=${facts.length} sources=${dedupedResults.length} instincts=${instinctsPromoted} revenue_signals=${revenueSignals.length}`,
   )
   await appendReceipt(r)
 
@@ -759,6 +775,50 @@ export async function searchKnowledge(raw: unknown): Promise<ToolResult<SearchKn
     } catch {
       // synthesis.md not present — fine, skip
     }
+  }
+
+  // ── Instincts scan ────────────────────────────────────────────────────────
+  // Scan instincts/promoted/*.md — the most distilled knowledge in the vault.
+  // These are invisible to the topic scan above but often contain the best signal.
+  // Boost their score by +1 to surface them ahead of lower-confidence topic facts.
+  try {
+    const ents = await fs.readdir(INSTINCTS_DIR, { withFileTypes: true })
+    const instinctFiles = ents
+      .filter((e) => e.isFile() && e.name.endsWith('.md'))
+      .map((e) => path.join(INSTINCTS_DIR, e.name))
+
+    for (const instinctPath of instinctFiles) {
+      let content: string
+      try {
+        content = await fs.readFile(instinctPath, 'utf8')
+      } catch {
+        continue
+      }
+
+      const slug = path.basename(instinctPath, '.md')
+      // Extract title from frontmatter title: or first # heading, else use slug
+      const titleMatch = content.match(/^title:\s*(.+)$/m) ?? content.match(/^#\s+(.+)$/m)
+      const title = titleMatch ? titleMatch[1].trim() : slug
+      // Body = content after frontmatter block (strip --- ... ---)
+      const body = content.replace(/^---[\s\S]*?---\s*\n/, '').trim().slice(0, 500)
+      const combined = (title + ' ' + body).toLowerCase()
+      const score = queryTerms.reduce((acc, term) => acc + (combined.includes(term) ? 1 : 0), 0)
+
+      if (score > 0) {
+        matches.push({
+          id: `instinct_${slug}`,
+          text: combined,
+          topic: 'instinct',
+          slug,
+          title,
+          body,
+          confidence: 1.0,
+          score: score + 1, // Instincts are distilled truth — slight boost
+        })
+      }
+    }
+  } catch {
+    // instincts/promoted/ may not exist yet — non-fatal
   }
 
   // Sort by score descending, then confidence
