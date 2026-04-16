@@ -22,9 +22,13 @@
 
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { z } from 'zod'
 import { promoteInstinct } from './vault'
 import type { ToolResult } from './tools'
+
+const execFileAsync = promisify(execFile)
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -676,6 +680,37 @@ async function geminiRerank<T extends { id: string }>(
   }
 }
 
+// ─── Semantic search via chroma-indexer.py ────────────────────────────────────
+
+const CHROMA_INDEXER = 'C:/Users/bobel/.openclaw/scripts/chroma-indexer.py'
+const CHROMA_TIMEOUT_MS = 15000  // model is cached; 15s covers slow I/O on first invocation
+
+interface SemanticChunk {
+  score: number
+  source: string
+  header: string
+  text: string
+}
+
+/**
+ * Run semantic similarity search against the numpy-backed COG brain.
+ * Returns up to k results or empty array on any failure (non-fatal).
+ */
+async function semanticBrainSearch(query: string, k: number): Promise<SemanticChunk[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      'python',
+      [CHROMA_INDEXER, '--query', query, '--json', '-k', String(k)],
+      { timeout: CHROMA_TIMEOUT_MS, encoding: 'utf8' },
+    )
+    const parsed = JSON.parse(stdout.trim()) as { results?: SemanticChunk[] }
+    return Array.isArray(parsed.results) ? parsed.results : []
+  } catch {
+    // Python not available, index not built, or timeout — degrade silently
+    return []
+  }
+}
+
 export async function searchKnowledge(raw: unknown): Promise<ToolResult<SearchKnowledgeResult>> {
   const parsed = searchKnowledgeSchema.safeParse(raw)
   if (!parsed.success) {
@@ -686,6 +721,12 @@ export async function searchKnowledge(raw: unknown): Promise<ToolResult<SearchKn
 
   const { query, limit } = parsed.data
   const queryTerms = query.toLowerCase().split(/\s+/).filter(Boolean)
+
+  // ── Semantic brain search (parallel with keyword scan) ─────────────────────
+  // Fires against the full 1600-chunk COG index via chroma-indexer.py.
+  // Results are merged with keyword hits below. Degrades silently if Python
+  // isn't available or the index isn't built yet.
+  const semanticPromise = semanticBrainSearch(query, Math.max(limit * 2, 12))
 
   // List all topic directories
   let topicDirs: string[] = []
@@ -821,10 +862,8 @@ export async function searchKnowledge(raw: unknown): Promise<ToolResult<SearchKn
     // instincts/promoted/ may not exist yet — non-fatal
   }
 
-  // Sort by score descending, then confidence
-  matches.sort((a, b) => b.score - a.score || b.confidence - a.confidence)
-
   // Gemini re-rank pass — top 20 candidates when conditions met
+  // (Final sort happens after semantic merge below)
   const geminiKey = process.env.GOOGLE_API_KEY
   let wasReranked = false
 
@@ -837,6 +876,37 @@ export async function searchKnowledge(raw: unknown): Promise<ToolResult<SearchKn
       wasReranked = true
     }
   }
+
+  // ── Merge semantic brain hits ─────────────────────────────────────────────
+  // Await the parallel semantic search and prepend high-confidence hits that
+  // aren't already covered by keyword matches. Semantic chunks come from
+  // ALL 142 COG files, not just the topics dir — so this surfaces vault
+  // content that Jarvis never explicitly learnTopic'd.
+  const semanticChunks = await semanticPromise
+  // Dedup key: first 80 chars of text (consistent — both keyword body and semantic text
+  // are raw content; keyword matches store text in the `text` field on ScoredFact).
+  const existingTexts = new Set(matches.map((m) => m.text.slice(0, 80)))
+  for (const chunk of semanticChunks) {
+    if (chunk.score < 0.3) continue  // below cosine threshold
+    const textKey = chunk.text.slice(0, 80)
+    if (existingTexts.has(textKey)) continue
+    existingTexts.add(textKey)
+    const slug = chunk.source.replace(/\\/g, '/').split('/').pop()?.replace('.md', '') ?? 'brain'
+    matches.push({
+      id: `semantic_${slug}_${matches.length}`,
+      text: chunk.text,
+      topic: chunk.header || chunk.source.split('/').slice(-2, -1)[0] || 'COG',
+      slug,
+      title: chunk.header || chunk.source,
+      body: chunk.text.slice(0, 500),
+      confidence: chunk.score,
+      score: Math.round(chunk.score * 10),  // normalised: 0.3→3, 0.8→8 — competes fairly with keyword term-count scores
+    })
+  }
+
+  // Final unified sort: semantic + keyword + instinct all compete by score then confidence.
+  // This replaces the earlier sort (which ran before semantic hits were added).
+  matches.sort((a, b) => b.score - a.score || b.confidence - a.confidence)
 
   const topFacts = matches.slice(0, limit).map(({ id: _id, text: _text, score: _score, ...rest }) => rest)
 
@@ -872,13 +942,13 @@ export async function searchKnowledge(raw: unknown): Promise<ToolResult<SearchKn
   })
 
   // Tool log line
-  const logLine = `[${now()}] searchKnowledge: query="${query.slice(0, 80)}" → ${topFacts.length} facts, ${relevantInsights.length} insights, reranked=${wasReranked}`
+  const logLine = `[${now()}] searchKnowledge: query="${query.slice(0, 80)}" → ${topFacts.length} facts, ${relevantInsights.length} insights, reranked=${wasReranked}, semantic=${semanticChunks.length}`
   await appendReceipt(logLine)
 
   const r = mkReceipt(
     'searchKnowledge',
     true,
-    `query="${query.slice(0, 60)}" hits=${topFacts.length} insights=${relevantInsights.length} reranked=${wasReranked} scanned=${topicDirs.length}`,
+    `query="${query.slice(0, 60)}" hits=${topFacts.length} semantic=${semanticChunks.length} insights=${relevantInsights.length} reranked=${wasReranked} scanned=${topicDirs.length}`,
   )
   await appendReceipt(r)
 
