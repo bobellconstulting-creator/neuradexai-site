@@ -48,6 +48,7 @@ Every claim needs a receipt from this turn. Never fabricate. Never narrate think
 
 const PRIMARY_MD_PATH = 'C:/Users/bobel/.openclaw/primary.md'
 const SOUL_PATH = path.join(process.cwd(), 'lib', 'personas', 'jarvis.soul.md')
+const SOUL_STATIC_PATH = path.join(process.cwd(), 'lib', 'jarvis', 'static-context', 'soul.md')
 
 // ─── Budget config ─────────────────────────────────────────────────────────
 
@@ -108,11 +109,15 @@ async function loadSoul(): Promise<string> {
   if (soulCache !== null && Date.now() - soulFetchedAt < SOUL_CACHE_TTL_MS) return soulCache
   try {
     soulCache = await readFile(SOUL_PATH, 'utf8')
-    soulFetchedAt = Date.now()
   } catch {
-    soulCache = `# Jarvis\n\nYou are Jarvis, Bo Bell's AI chief of operations.\n`
-    soulFetchedAt = Date.now()
+    // Primary path is local Windows path — on Vercel fall back to bundled static copy.
+    try {
+      soulCache = await readFile(SOUL_STATIC_PATH, 'utf8')
+    } catch {
+      soulCache = `# Jarvis\n\nYou are Jarvis, Bo Bell's AI chief of operations.\n`
+    }
   }
+  soulFetchedAt = Date.now()
   return soulCache
 }
 

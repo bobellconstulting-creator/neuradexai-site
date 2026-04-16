@@ -1,6 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Ensure .md persona/context files are included in Vercel serverless bundles.
+  // Without this, readFile() on these paths silently falls back to generic stubs.
+  outputFileTracingIncludes: {
+    '/api/jarvis/**': ['./lib/jarvis/static-context/**', './lib/personas/**'],
+  },
   images: {
     domains: [],
   },

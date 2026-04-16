@@ -86,7 +86,7 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY ?? ''
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY ?? ''
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY ?? ''
 
-const GEMINI_MODEL = 'gemini-2.5-pro'
+const GEMINI_MODEL = 'gemini-2.5-flash'
 // Groq: llama-3.3-70b-versatile is the reliable tool-calling model.
 // Kimi K2 removed — inconsistent function call JSON causes chain failures.
 const GROQ_MODELS: readonly string[] = ['llama-3.3-70b-versatile']
@@ -1005,24 +1005,8 @@ export async function runJarvisTurn(
   const toolCalls: ToolCallLog[] = []
   const lastErrors: string[] = []
 
-  // Groq first — llama-3.3-70b-versatile is reliable and rarely rate-limited.
-  if (GROQ_API_KEY) {
-    try {
-      const { reply } = await runWithGroq(systemPrompt, history, userMessage, manifest, toolCalls, opts)
-      const finalHistory: Message[] = [
-        ...history,
-        { role: 'user', content: userMessage },
-        { role: 'assistant', content: reply },
-      ]
-      return { reply, toolCalls, history: finalHistory, provider: 'groq' }
-    } catch (e) {
-      lastErrors.push(`Groq: ${errMsg(e).slice(0, 120)}`)
-      // eslint-disable-next-line no-console
-      console.warn('[jarvis/fc] Groq failed → Gemini:', errMsg(e).slice(0, 120))
-    }
-  }
-
-  // Gemini — secondary (free tier quota can exhaust mid-day)
+  // Gemini first — 2.5 Flash follows persona and tool-calling reliably.
+  // Groq Llama-3.3-70b was first but doesn't hold the JARVIS voice under complex system prompts.
   if (GOOGLE_API_KEY) {
     try {
       const { reply } = await runWithGemini(systemPrompt, history, userMessage, manifest, toolCalls, opts)
@@ -1035,7 +1019,24 @@ export async function runJarvisTurn(
     } catch (e) {
       lastErrors.push(`Gemini: ${errMsg(e).slice(0, 120)}`)
       // eslint-disable-next-line no-console
-      console.warn('[jarvis/fc] Gemini failed → OpenRouter:', errMsg(e).slice(0, 120))
+      console.warn('[jarvis/fc] Gemini failed → Groq:', errMsg(e).slice(0, 120))
+    }
+  }
+
+  // Groq — secondary (free tier, rate-limited at peak)
+  if (GROQ_API_KEY) {
+    try {
+      const { reply } = await runWithGroq(systemPrompt, history, userMessage, manifest, toolCalls, opts)
+      const finalHistory: Message[] = [
+        ...history,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content: reply },
+      ]
+      return { reply, toolCalls, history: finalHistory, provider: 'groq' }
+    } catch (e) {
+      lastErrors.push(`Groq: ${errMsg(e).slice(0, 120)}`)
+      // eslint-disable-next-line no-console
+      console.warn('[jarvis/fc] Groq failed → OpenRouter:', errMsg(e).slice(0, 120))
     }
   }
 

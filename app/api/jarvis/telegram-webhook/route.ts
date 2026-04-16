@@ -10,6 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { waitUntil } from '@vercel/functions'
 import { buildJarvisSystemPrompt } from '@/lib/jarvis/context-injector'
 import { runJarvisTurn, type Message, type ToolCallLog } from '@/lib/jarvis/function-calling'
 import { appendTurn, getHistory, type Turn } from '@/lib/jarvis/conversation'
@@ -71,40 +72,17 @@ async function sendTelegramReply(chatId: string, text: string): Promise<void> {
 
 // ── Context preamble (same as the main telegram route) ─────────────────────
 
+// Hard constraints appended after SOUL.md — reinforce, don't duplicate.
 const TELEGRAM_CTX = `\
-You are JARVIS. Bo Bell is your operator. This is a private mobile chat — direct, tight, real.
-
-HONESTY — NON-NEGOTIABLE:
-- NEVER invent facts, events, calendar entries, names, or data you did not receive from a tool call this turn.
-- If you don't know something, say so in one sentence. Do NOT guess or fabricate.
-- Calendar data ONLY comes from calling getCalendar. If you haven't called it, you don't know what's on it.
-- "Ok?" from Bo means he's acknowledging. Reply with one word or one short sentence — not a list of options.
-
-FORMATTING — ABSOLUTE HARD STOP:
-- Plain text only. Zero markdown. No asterisks, no bold, no bullets, no numbered lists, no dashes, no headers. NONE.
-- Maximum TWO sentences. This is a hard limit, not a suggestion. Count every sentence ending with . ! or ?
-  If your draft has three or more, you MUST delete until only two remain. No exceptions.
-- One sentence is often better than two. If the answer fits in one, use one.
-- NEVER write meta-commentary. Never "Revised to comply", "Note:", "Here's a summary:", "In conclusion:". Just the answer.
-- NEVER offer a menu of options. NEVER ask Bo to pick from a list. One direct reply or one sharp question only.
-
-2FA / BLOCKED PROTOCOL — EXACT FORMAT REQUIRED:
-When hitting a login wall, SMS code, hardware key, or any human-required step:
-  BLOCKED: [service name] needs [exact thing needed — e.g. "SMS code to +1-xxx-xxx-1234", "tap your YubiKey", "solve CAPTCHA"].
-  Waiting — reply with the code or confirm when done.
-That is exactly two sentences. Nothing more. Do NOT explain what you were trying to do. Do NOT apologize.
-
-TOOL USE:
-- Calendar questions → call getCalendar FIRST, then answer from real data.
-- Research/learn requests → call learnTopic immediately. Queue with queueResearch if "later".
-- Web lookups → call searchWeb. Reading a URL → fetchUrl.
-- Actionable requests → call the tool, report result in ONE sentence.
-
-CHECK-IN / LOCATION DETECTION:
-When Bo says anything implying arrival or movement — "I'm here", "just arrived", "heading in", "with the client", "at the office", "pulling up", "on my way", "leaving now", "just got here" — check if there's a calendar event active or starting within 60 minutes. If yes:
-- If the event has no address saved yet: ask for it in one sentence. "Got it — what's the address for [Event]? I'll save it."
-- If you already have COG notes on the person: "Noted. I have background on [Person] from last time if you need it."
-- One sentence only. Never list options.
+TELEGRAM HARD RULES (non-negotiable enforcement layer):
+- Plain text only. Zero markdown. No asterisks, bullets, headers, bold, dashes. None.
+- Two sentences maximum per reply. Count them. Delete the third.
+- Never open with a greeting. No "Hey Bo", no "Hello", no "What's up". Start with the substance.
+- "sir" or "Bo" only. Never boss, buddy, chief, or friend.
+- No meta-commentary. No "Here's a summary:", no "Note:", no "To answer your question". Just answer.
+- Calendar data only from getCalendar tool. Never fabricate schedule.
+- "Ok?" from Bo = he's acknowledging. Reply with one word or one sentence max.
+- BLOCKED format: exactly "BLOCKED: [service] needs [exact thing]." then "Waiting — reply with the code or confirm when done." Nothing else.
 `
 
 // ── Route ───────────────────────────────────────────────────────────────────
@@ -163,72 +141,65 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } catch { /* fall through to normal turn */ }
   }
 
-  // ── Build system prompt ────────────────────────────────────────────────────
-  let systemPrompt: string
-  try {
-    systemPrompt = await buildJarvisSystemPrompt()
-  } catch {
-    systemPrompt = 'You are Jarvis, Bo Bell\'s AI chief of operations. Be direct, use "sir" or "Bo".'
-  }
-  const fullSystemPrompt = `${systemPrompt}\n\n---\n${TELEGRAM_CTX}`
-
-  // ── Load history ───────────────────────────────────────────────────────────
-  let history: Message[] = []
-  try {
-    const turns = await getHistory(chatId, HISTORY_LIMIT)
-    history = turnsToMessages(turns)
-  } catch { /* start fresh */ }
-
-  // Persist user turn
-  try {
-    await appendTurn(chatId, 'user', message, { source: 'telegram-webhook' })
-  } catch { /* non-fatal */ }
-
-  // ── Run Jarvis ─────────────────────────────────────────────────────────────
-  let reply = ''
-  let provider = 'unknown'
-  let toolCalls: ToolCallLog[] = []
-
-  try {
-    const result = await runJarvisTurn(fullSystemPrompt, message, history)
-    reply = result.reply
-    provider = result.provider
-    toolCalls = result.toolCalls
-
-    // Persist assistant turn
+  // Return 200 to Telegram immediately, then process in background.
+  // Vercel Node.js runtime keeps the function alive until all async work completes
+  // (up to maxDuration). This prevents Telegram's 60s webhook timeout.
+  const processInBackground = async () => {
+    // ── Build system prompt ──────────────────────────────────────────────────
+    let systemPrompt: string
     try {
-      await appendTurn(chatId, 'assistant', reply, {
-        source: 'telegram-webhook',
-        provider,
-        toolCalls: toolCalls.map((t) => ({ name: t.name, ok: t.ok, durationMs: t.durationMs })),
-      })
+      systemPrompt = await buildJarvisSystemPrompt()
+    } catch {
+      systemPrompt = 'You are Jarvis, Bo Bell\'s AI chief of operations. Be direct, use "Bo".'
+    }
+    const fullSystemPrompt = `${systemPrompt}\n\n---\n${TELEGRAM_CTX}`
+
+    // ── Load history ─────────────────────────────────────────────────────────
+    let history: Message[] = []
+    try {
+      const turns = await getHistory(chatId, HISTORY_LIMIT)
+      history = turnsToMessages(turns)
+    } catch { /* start fresh */ }
+
+    // Persist user turn
+    try {
+      await appendTurn(chatId, 'user', message, { source: 'telegram-webhook' })
     } catch { /* non-fatal */ }
 
-    // Audit line appended to outgoing message only
-    const auditLine = toolCalls.length > 0
-      ? `\n\n[tools: ${toolCalls.map((t) => `${t.name}${t.ok ? '' : ' FAIL'}`).join(', ')}]`
-      : ''
-    const outgoing = reply + auditLine
+    // ── Run Jarvis ────────────────────────────────────────────────────────────
+    try {
+      const result = await runJarvisTurn(fullSystemPrompt, message, history)
+      const { reply, provider, toolCalls } = result
 
-    // Send reply via Telegram
-    await sendTelegramReply(chatId, outgoing)
-
-    // Auto-reflect
-    if (message && reply) {
-      const transcript = `Bo: ${message}\n\nJarvis: ${outgoing}`
-      reflect(transcript)
-        .then(async (result) => {
-          await persistReflectionResult(result)
-          invalidateMemoryCache()
+      try {
+        await appendTurn(chatId, 'assistant', reply, {
+          source: 'telegram-webhook',
+          provider,
+          toolCalls: toolCalls.map((t) => ({ name: t.name, ok: t.ok, durationMs: t.durationMs })),
         })
-        .catch(() => {})
+      } catch { /* non-fatal */ }
+
+      const auditLine = toolCalls.length > 0
+        ? `\n\n[tools: ${toolCalls.map((t) => `${t.name}${t.ok ? '' : ' FAIL'}`).join(', ')}]`
+        : ''
+      const outgoing = reply + auditLine
+
+      await sendTelegramReply(chatId, outgoing)
+
+      if (message && reply) {
+        reflect(`Bo: ${message}\n\nJarvis: ${outgoing}`)
+          .then(async (r) => { await persistReflectionResult(r, `Bo: ${message}\n\nJarvis: ${outgoing}`); invalidateMemoryCache() })
+          .catch(() => {})
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[telegram-webhook] runJarvisTurn failed:', errMsg(e))
+      await sendTelegramReply(chatId, `INCIDENT: all providers failed. ${errMsg(e).slice(0, 100)}`)
     }
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.error('[telegram-webhook] runJarvisTurn failed:', errMsg(e))
-    await sendTelegramReply(chatId, `INCIDENT: all providers failed. ${errMsg(e).slice(0, 100)}`)
   }
 
-  // Always return 200 to Telegram
+  // waitUntil keeps the Vercel function alive after response is sent
+  waitUntil(processInBackground())
+
   return NextResponse.json({ ok: true })
 }
