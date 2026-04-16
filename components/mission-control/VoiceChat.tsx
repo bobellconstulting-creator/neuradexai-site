@@ -117,7 +117,12 @@ export function VoiceChat({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: trimmed, chatId: channel }),
       })
-      const data = (await res.json()) as { ok: boolean; reply?: string; error?: string }
+      // Route returns NDJSON stream (keepalive \n lines then one JSON line).
+      // Parse the last non-empty line as the actual response.
+      const text = await res.text()
+      const lastLine = text.split('\n').filter(l => l.trim()).pop() ?? ''
+      let data: { ok: boolean; reply?: string; error?: string } = { ok: false }
+      try { data = JSON.parse(lastLine) as typeof data } catch { /* fall through */ }
       const reply = data.ok && data.reply ? data.reply : (data.error ?? 'No response.')
 
       setMessages((prev) =>

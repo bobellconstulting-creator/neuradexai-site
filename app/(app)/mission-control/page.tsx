@@ -7,7 +7,6 @@ import { CalendarPanel } from '@/components/mission-control/CalendarPanel'
 import { TaskBoard } from '@/components/mission-control/TaskBoard'
 import { VoiceChat } from '@/components/mission-control/VoiceChat'
 import { FileDropzone } from '@/components/mission-control/FileDropzone'
-import { SystemStatusPills } from '@/components/mission-control/SystemStatusPills'
 
 // ─── Jarvis status hook ───────────────────────────────────────────────────────
 
@@ -291,11 +290,7 @@ export default function MissionControlPage() {
           </div>
         </div>
 
-        {/* Bottom status bar */}
-        <footer className="relative z-10 flex items-center gap-4 px-6 py-2 border-t border-[var(--mc-border)] bg-[rgba(5,7,20,0.7)] backdrop-blur-md flex-shrink-0">
-          <span className="mc-label mc-label-brass hidden sm:block">SYSTEMS</span>
-          <SystemStatusPills />
-        </footer>
+        {/* Bottom status bar removed — was noise */}
       </div>
     </div>
   )
