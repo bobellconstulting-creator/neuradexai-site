@@ -15,5 +15,13 @@ module.exports = {
       watch: false,
       autorestart: true,
     },
+    {
+      name: 'jarvis-meeting-alert',
+      script: 'scripts/jarvis-meeting-alert.ts',
+      interpreter: 'ts-node',
+      cron_restart: '*/10 * * * *',
+      watch: false,
+      autorestart: false,
+    },
   ],
 }

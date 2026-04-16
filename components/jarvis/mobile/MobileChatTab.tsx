@@ -9,15 +9,44 @@ interface ChatMessage {
   ts: number
 }
 
+const STORAGE_KEY = 'jarvis-mobile-chat-v1'
+const MAX_STORED  = 50
+
+function loadMessages(): ChatMessage[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return []
+    return JSON.parse(raw) as ChatMessage[]
+  } catch {
+    return []
+  }
+}
+
+function saveMessages(msgs: ChatMessage[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs.slice(-MAX_STORED)))
+  } catch {
+    // quota or SSR — ignore
+  }
+}
+
 export default function MobileChatTab() {
-  const [messages, setMessages]   = useState<ChatMessage[]>([])
+  const [messages, setMessages]   = useState<ChatMessage[]>(loadMessages)
   const [input, setInput]         = useState('')
   const [thinking, setThinking]   = useState(false)
   const bottomRef                 = useRef<HTMLDivElement>(null)
   const inputRef                  = useRef<HTMLTextAreaElement>(null)
 
   // Build history for the API from local state
-  const historyRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
+  const historyRef = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>(
+    loadMessages().map(m => ({ role: m.role, content: m.content }))
+  )
+
+  // Persist messages whenever they change
+  useEffect(() => {
+    saveMessages(messages)
+  }, [messages])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -44,7 +73,10 @@ export default function MobileChatTab() {
         }),
       })
 
-      const data = (await res.json()) as { ok: boolean; reply?: string; error?: string }
+      // Stream response — newlines are keepalive; last non-empty line is JSON payload
+      const text = await res.text()
+      const lastLine = text.split('\n').filter(l => l.trim()).pop() ?? ''
+      const data = (lastLine ? JSON.parse(lastLine) : { ok: false, error: 'empty response' }) as { ok: boolean; reply?: string; error?: string }
 
       if (data.ok && data.reply) {
         const assistantMsg: ChatMessage = { role: 'assistant', content: data.reply, ts: Date.now() }

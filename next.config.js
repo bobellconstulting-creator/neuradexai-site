@@ -14,7 +14,7 @@ const nextConfig = {
       // Mark as externals so webpack doesn't bundle them. Tool calls that require them will
       // return BLOCKED errors gracefully on Vercel, which is the expected behavior.
       const existing = Array.isArray(config.externals) ? config.externals : []
-      config.externals = [...existing, 'playwright', 'patchright', '@playwright/test']
+      config.externals = [...existing, 'playwright', 'patchright', '@playwright/test', 'bufferutil', 'utf-8-validate', 'msedge-tts']
     }
     return config
   },

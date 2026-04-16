@@ -68,6 +68,21 @@ export const calculateEarningsSchema = z.object({
 })
 export type CalculateEarningsArgs = z.infer<typeof calculateEarningsSchema>
 
+const COG_ROOT = (process.env.COG_VAULT_ROOT ?? 'C:/Users/bobel/COG').replace(/\\/g, '/')
+const RESEARCH_QUEUE_PATH = `${COG_ROOT}/RESEARCH-QUEUE.md`
+
+export const readDocSchema = z.object({
+  path: z.string().min(1).describe('Path relative to COG vault root, e.g. "RESEARCH-QUEUE.md" or "00-inbox/MY-INTERESTS.md"'),
+})
+export type ReadDocArgs = z.infer<typeof readDocSchema>
+
+export const queueResearchSchema = z.object({
+  topic: z.string().min(1).max(300),
+  priority: z.enum(['high', 'normal']).optional().default('normal'),
+  notes: z.string().max(400).optional(),
+})
+export type QueueResearchArgs = z.infer<typeof queueResearchSchema>
+
 // ──────────────────────────────────────────────────────────────────────────
 // Implementations
 // ──────────────────────────────────────────────────────────────────────────
@@ -235,6 +250,89 @@ export async function syncCalendarToVault(
   } catch (err) {
     const msg = getErrorMessage(err)
     const r = mkReceipt('syncCalendarToVault', false, msg)
+    await appendReceipt(r)
+    return { ok: false, error: msg, receipt: r }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// readDoc — read a file from COG vault
+// ──────────────────────────────────────────────────────────────────────────
+
+export async function readDoc(
+  raw: unknown
+): Promise<ToolResult<{ path: string; content: string; bytes: number }>> {
+  const parsed = readDocSchema.safeParse(raw)
+  if (!parsed.success) {
+    const r = mkReceipt('readDoc', false, 'invalid args: ' + parsed.error.message)
+    await appendReceipt(r)
+    return { ok: false, error: parsed.error.message, receipt: r }
+  }
+
+  // Sanitize: strip leading slashes, resolve within COG root, no traversal
+  const rel = parsed.data.path.replace(/^[/\\]+/, '')
+  const fullPath = path.join(COG_ROOT, rel)
+  if (!fullPath.startsWith(path.resolve(COG_ROOT))) {
+    const r = mkReceipt('readDoc', false, 'path traversal denied')
+    await appendReceipt(r)
+    return { ok: false, error: 'path traversal denied', receipt: r }
+  }
+
+  try {
+    const content = await fs.readFile(fullPath, 'utf8')
+    const bytes = Buffer.byteLength(content, 'utf8')
+    const r = mkReceipt('readDoc', true, `read ${bytes}B from ${fullPath}`)
+    await appendReceipt(r)
+    return { ok: true, result: { path: fullPath, content, bytes }, receipt: r }
+  } catch (err) {
+    const msg = getErrorMessage(err)
+    const r = mkReceipt('readDoc', false, msg)
+    await appendReceipt(r)
+    return { ok: false, error: msg, receipt: r }
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// queueResearch — append a topic to RESEARCH-QUEUE.md
+// ──────────────────────────────────────────────────────────────────────────
+
+export async function queueResearch(
+  raw: unknown
+): Promise<ToolResult<{ topic: string; queuePath: string; position: number }>> {
+  const parsed = queueResearchSchema.safeParse(raw)
+  if (!parsed.success) {
+    const r = mkReceipt('queueResearch', false, 'invalid args: ' + parsed.error.message)
+    await appendReceipt(r)
+    return { ok: false, error: parsed.error.message, receipt: r }
+  }
+
+  const { topic, priority, notes } = parsed.data
+  const added = new Date().toISOString().split('T')[0]
+  const meta = notes ? `, notes: ${notes}` : ''
+  const priorityFlag = priority === 'high' ? ' ⚡' : ''
+  const line = `- [ ]${priorityFlag} ${topic} <!-- added: ${added}${meta} -->\n`
+
+  try {
+    await fs.mkdir(path.dirname(RESEARCH_QUEUE_PATH), { recursive: true })
+
+    let existing = ''
+    try { existing = await fs.readFile(RESEARCH_QUEUE_PATH, 'utf8') } catch { /* new file */ }
+
+    if (existing.length === 0) {
+      existing = '# Research Queue\n\nTopics Jarvis should research and absorb into COG.\n\n'
+    }
+
+    // Count pending items to report position
+    const pendingCount = (existing.match(/^- \[ \]/gm) ?? []).length
+
+    await fs.appendFile(RESEARCH_QUEUE_PATH, line, 'utf8')
+
+    const r = mkReceipt('queueResearch', true, `queued "${topic}" (position ~${pendingCount + 1})`)
+    await appendReceipt(r)
+    return { ok: true, result: { topic, queuePath: RESEARCH_QUEUE_PATH, position: pendingCount + 1 }, receipt: r }
+  } catch (err) {
+    const msg = getErrorMessage(err)
+    const r = mkReceipt('queueResearch', false, msg)
     await appendReceipt(r)
     return { ok: false, error: msg, receipt: r }
   }

@@ -6,17 +6,19 @@ import { useMissionTasks } from '@/lib/useMissionTasks'
 import type { MissionTask, TaskPriority } from '@/lib/missionTasks'
 
 const STATUS_GLYPH: Record<MissionTask['status'], string> = {
-  open:        '◌',
-  in_progress: '◐',
-  done:        '●',
-  blocked:     '!',
+  open:              '◌',
+  in_progress:       '◐',
+  done:              '●',
+  blocked:           '!',
+  awaiting_approval: '?',
 }
 
 const STATUS_COLOR: Record<MissionTask['status'], string> = {
-  open:        '#efb356',
-  in_progress: '#00d4ff',
-  done:        '#22c55e',
-  blocked:     '#ff6060',
+  open:              '#efb356',
+  in_progress:       '#00d4ff',
+  done:              '#22c55e',
+  blocked:           '#ff6060',
+  awaiting_approval: '#a855f7',
 }
 
 const PRIORITY_LABEL: Record<TaskPriority, string> = {

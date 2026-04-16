@@ -16,7 +16,7 @@
  * Token estimate: ~4 chars ≈ 1 token (no tiktoken dependency).
  */
 
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   listPromotedInstincts,
@@ -24,6 +24,7 @@ import {
   readBoProfile,
   VAULT_PATHS,
 } from './vault'
+
 import type { PersistedInstinct } from './types'
 import { getUpcomingEvents } from '../google/calendar'
 import type { CalendarEvent } from '../google/calendar'
@@ -35,9 +36,9 @@ const SOUL_PATH = path.join(process.cwd(), 'lib', 'personas', 'jarvis.soul.md')
 
 // ─── Budget config ─────────────────────────────────────────────────────────
 
-const MEMORY_TOKEN_BUDGET = 5_000
-const TOP_INSTINCTS = 10
-const RECENT_DAILIES = 3
+const MEMORY_TOKEN_BUDGET = 1_500  // Groq free tier: 6k TPM total — leave room for history + response
+const TOP_INSTINCTS = 8
+const RECENT_DAILIES = 2
 
 // ─── Cache TTLs ────────────────────────────────────────────────────────────
 
@@ -100,12 +101,77 @@ async function loadSoul(): Promise<string> {
   return soulCache
 }
 
+// ─── Recent topic syntheses ────────────────────────────────────────────────
+
+const TOPICS_DIR = path.join('C:/Users/bobel/COG', '05-knowledge', 'topics')
+const MAX_TOPICS = 2
+const TOPIC_TOKEN_BUDGET = 400 // per topic — keep tight for Groq budget
+
+interface TopicSummary {
+  slug: string
+  content: string
+}
+
+let topicsCache: TopicSummary[] | null = null
+let topicsCachedAt = 0
+const TOPICS_TTL_MS = 10 * 60 * 1000 // 10 min
+
+async function loadRecentTopics(): Promise<TopicSummary[]> {
+  if (topicsCache !== null && Date.now() - topicsCachedAt < TOPICS_TTL_MS) return topicsCache
+
+  try {
+    const slugs = await readdir(TOPICS_DIR, { withFileTypes: true })
+    const dirs = slugs
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+
+    // Sort by most-recently modified synthesis.md, fallback to index.md
+    const withMtime: Array<{ slug: string; mtime: number }> = []
+    for (const slug of dirs) {
+      try {
+        const { promises: fs } = await import('node:fs')
+        const synth = path.join(TOPICS_DIR, slug, 'synthesis.md')
+        const idx   = path.join(TOPICS_DIR, slug, 'index.md')
+        const stat  = await fs.stat(synth).catch(() => fs.stat(idx).catch(() => null))
+        if (stat) withMtime.push({ slug, mtime: stat.mtimeMs })
+      } catch { /* skip */ }
+    }
+
+    withMtime.sort((a, b) => b.mtime - a.mtime)
+    const recent = withMtime.slice(0, MAX_TOPICS)
+
+    const results: TopicSummary[] = []
+    for (const { slug } of recent) {
+      try {
+        // Prefer synthesis.md (structured), fallback to index.md
+        const synthPath = path.join(TOPICS_DIR, slug, 'synthesis.md')
+        const idxPath   = path.join(TOPICS_DIR, slug, 'index.md')
+        let content = await readFile(synthPath, 'utf8').catch(() => readFile(idxPath, 'utf8').catch(() => ''))
+        if (content) {
+          // Trim to token budget
+          content = content.slice(0, TOPIC_TOKEN_BUDGET * 4)
+          results.push({ slug, content })
+        }
+      } catch { /* skip */ }
+    }
+
+    topicsCache = results
+    topicsCachedAt = Date.now()
+    return results
+  } catch {
+    topicsCache = []
+    topicsCachedAt = Date.now()
+    return []
+  }
+}
+
 // ─── Cache: vault memory ───────────────────────────────────────────────────
 
 interface VaultCache {
   bo: string
   instincts: PersistedInstinct[]
   dailies: Array<{ date: string; content: string }>
+  topics: TopicSummary[]
   fetchedAt: number
 }
 
@@ -115,12 +181,13 @@ async function getVaultCached(): Promise<VaultCache> {
   if (vaultCache && Date.now() - vaultCache.fetchedAt < VAULT_CACHE_TTL_MS) {
     return vaultCache
   }
-  const [bo, instincts, dailies] = await Promise.all([
+  const [bo, instincts, dailies, topics] = await Promise.all([
     readBoProfile(),
     listPromotedInstincts(TOP_INSTINCTS),
     listRecentDailyNotes(RECENT_DAILIES),
+    loadRecentTopics(),
   ])
-  vaultCache = { bo, instincts, dailies, fetchedAt: Date.now() }
+  vaultCache = { bo, instincts, dailies, topics, fetchedAt: Date.now() }
   return vaultCache
 }
 
@@ -325,6 +392,12 @@ function renderBo(bo: string): string {
   return `## Current Bo Profile (from vault)\n${bo.trim()}`
 }
 
+function renderTopics(topics: TopicSummary[]): string {
+  if (topics.length === 0) return ''
+  const blocks = topics.map(({ slug, content }) => `### ${slug}\n${content.trim()}`)
+  return `## Recently Learned Topics (from vault research)\n${blocks.join('\n\n')}`
+}
+
 function renderDailies(items: Array<{ date: string; content: string }>): string {
   if (items.length === 0) return ''
   const blocks = items.map(({ date, content }) => `### ${date}\n${content.trim()}`)
@@ -341,15 +414,18 @@ function fitToBudget(
   bo: string,
   instincts: PersistedInstinct[],
   dailies: Array<{ date: string; content: string }>,
+  topics: TopicSummary[] = [],
 ): string {
   let workingDailies = [...dailies]
   let workingInstincts = [...instincts]
+  let workingTopics = [...topics]
 
   const compose = (): string => {
     const sections = [
       renderInstincts(workingInstincts),
       renderBo(bo),
       renderDailies(workingDailies),
+      renderTopics(workingTopics),
     ].filter(Boolean)
     return sections.join('\n\n')
   }
@@ -357,8 +433,10 @@ function fitToBudget(
   let composed = compose()
 
   while (approxTokens(composed) > MEMORY_TOKEN_BUDGET) {
-    if (workingDailies.length > 0) {
-      workingDailies.pop() // drop the oldest (last in descending list)
+    if (workingTopics.length > 0) {
+      workingTopics.pop() // drop oldest topic first (cheapest to lose)
+    } else if (workingDailies.length > 0) {
+      workingDailies.pop() // drop the oldest daily note
     } else if (workingInstincts.length > 0) {
       workingInstincts = workingInstincts
         .slice()
@@ -399,7 +477,7 @@ export async function buildJarvisSystemPrompt(): Promise<string> {
   // Choose the anchor: full SOUL on day-start, lean primary.md otherwise.
   const anchor = freshDay ? await loadSoul() : await loadPrimaryMd()
 
-  const memorySection = fitToBudget(vault.bo, vault.instincts, vault.dailies)
+  const memorySection = fitToBudget(vault.bo, vault.instincts, vault.dailies, vault.topics)
 
   const parts: string[] = [anchor]
 
@@ -413,5 +491,14 @@ export async function buildJarvisSystemPrompt(): Promise<string> {
     parts.push(calendarBlock)
   }
 
-  return parts.join('\n\n')
+  const assembled = parts.join('\n\n')
+
+  // Hard cap: Groq free tier is 6k TPM. Keep system prompt ≤ 3500 tokens
+  // so conversation history + user message + response fit in the budget.
+  const MAX_SYSTEM_TOKENS = 3_500
+  if (approxTokens(assembled) > MAX_SYSTEM_TOKENS) {
+    return trimToTokens(assembled, MAX_SYSTEM_TOKENS)
+  }
+
+  return assembled
 }

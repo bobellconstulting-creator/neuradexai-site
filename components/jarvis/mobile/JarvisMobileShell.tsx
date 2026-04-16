@@ -68,8 +68,8 @@ export default function JarvisMobileShell({
         </div>
       </div>
 
-      {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
+      {/* Content area — each tab manages its own scroll */}
+      <div className="flex-1 min-h-0 overflow-hidden">
         {children}
       </div>
 

@@ -43,13 +43,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const tts = new MsEdgeTTS()
     await tts.setMetadata(EDGE_VOICE, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
 
+    // msedge-tts v2 toStream() returns {audioStream, metadataStream}
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { audioStream } = tts.toStream(text) as any
     const audioBuffer = await new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = []
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const readable = tts.toStream(text) as any
-      readable.on('data', (chunk: unknown) => chunks.push(Buffer.from(chunk as ArrayBuffer)))
-      readable.on('end', () => resolve(Buffer.concat(chunks)))
-      readable.on('error', reject)
+      audioStream.on('data', (chunk: unknown) => chunks.push(Buffer.from(chunk as ArrayBuffer)))
+      audioStream.on('end', () => resolve(Buffer.concat(chunks)))
+      audioStream.on('error', reject)
     })
 
     return new NextResponse(audioBuffer.buffer as ArrayBuffer, {

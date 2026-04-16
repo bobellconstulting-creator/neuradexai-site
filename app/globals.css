@@ -322,3 +322,8 @@
 .mc-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .mc-scroll::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.25); border-radius: 999px; }
 .mc-scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* Demo mode — iPhone viewport presentation */
+.demo-mode .mc-left-rail    { display: none !important; }
+.demo-mode .mc-demo-center  { max-width: 390px; margin: 0 auto; }
+.demo-mode .mc-demo-btn     { color: #00d4ff; border-color: rgba(0,212,255,0.60); background: rgba(0,212,255,0.10); }

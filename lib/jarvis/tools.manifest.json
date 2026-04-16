@@ -118,7 +118,7 @@
         "properties": {
           "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
           "outPath": { "type": "string", "description": "Optional absolute output .wav path. Defaults to C:/Users/bobel/tmp/jarvis-speech/<timestamp>.wav." },
-          "voice": { "type": "string", "enum": ["alan"], "default": "alan", "description": "Voice alias. Add more by dropping <name>.onnx + <name>.onnx.json into C:/Users/bobel/tools/piper/voices/ and extending PIPER_VOICES + speakVoiceEnum." },
+          "voice": { "type": "string", "enum": ["alan", "adam"], "default": "alan", "description": "Voice alias. 'alan' = local Piper (free, offline). 'adam' = ElevenLabs (paid, requires ELEVENLABS_API_KEY env var). JARVIS_VOICE_ENGINE=elevenlabs forces ElevenLabs for any voice." },
           "sendToTelegram": { "type": "boolean", "default": false, "description": "If true, convert wav -> ogg via ffmpeg and POST to Telegram sendVoice. Falls back to sendAudio (wav) if ffmpeg fails." },
           "telegramChatId": { "type": "string", "description": "Optional override. Defaults to Bo's chat id 7240677590." }
         },
@@ -322,7 +322,7 @@
     },
     {
       "name": "delegateToClaudeCode",
-      "description": "Delegate a coding, debugging, or research task to the local Claude Code CLI. USE ONLY when Bo explicitly asks — never auto-trigger. Budget cap defaults to $0.50, maximum $2.00.",
+      "description": "Spawn a real Claude Code CLI session to handle complex coding tasks. Use when the task requires multi-file edits, refactors, or builds beyond simple tool calls. Returns the changes made.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -415,6 +415,32 @@
           "target": { "type": "string", "enum": ["production", "preview"], "description": "Deployment target. Default production.", "default": "production" }
         },
         "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "readDoc",
+      "description": "Read a file from the COG Obsidian vault. Use to check the research queue, interests list, or any vault note. Path is relative to COG root (e.g. 'RESEARCH-QUEUE.md', '00-inbox/MY-INTERESTS.md').",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "description": "File path relative to COG vault root." }
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "queueResearch",
+      "description": "Add a topic to the research queue (COG/RESEARCH-QUEUE.md). Jarvis drains the queue automatically each night. Use when Bo says 'queue up', 'add to research list', 'look into later', or when Jarvis wants to research something found mid-conversation.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "topic": { "type": "string", "minLength": 1, "maxLength": 300, "description": "The topic to research." },
+          "priority": { "type": "string", "enum": ["high", "normal"], "description": "High priority items get researched first. Default normal.", "default": "normal" },
+          "notes": { "type": "string", "maxLength": 400, "description": "Optional context or angle for the research." }
+        },
+        "required": ["topic"],
         "additionalProperties": false
       }
     }

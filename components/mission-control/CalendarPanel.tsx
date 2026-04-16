@@ -231,7 +231,7 @@ function AddEventForm({ onCreated, onCancel }: { onCreated: () => void; onCancel
 
 // ── Main panel ────────────────────────────────────────────────────────────
 
-export function CalendarPanel() {
+export function CalendarPanel({ fullHeight }: { fullHeight?: boolean }) {
   const [events,   setEvents]   = useState<CalendarEvent[]>([])
   const [loading,  setLoading]  = useState(true)
   const [error,    setError]    = useState<string | null>(null)
@@ -287,7 +287,7 @@ export function CalendarPanel() {
   const groups = groupByDate(events)
 
   return (
-    <div className="mc-panel mc-corners flex flex-col">
+    <div className={`mc-panel mc-corners flex flex-col${fullHeight ? ' h-full' : ''}`}>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--mc-border)]">
         <span className="mc-label mc-label-brass">CALENDAR · 7 DAYS</span>
@@ -310,7 +310,7 @@ export function CalendarPanel() {
       </div>
 
       {/* Body */}
-      <div className="px-3 py-2 space-y-3 overflow-y-auto mc-scroll max-h-[400px]">
+      <div className={`px-3 py-2 space-y-3 overflow-y-auto mc-scroll${fullHeight ? ' flex-1 min-h-0' : ' max-h-[400px]'}`}>
         {/* Auth prompt */}
         {authUrl && (
           <div className="flex flex-col items-center gap-2 py-4">

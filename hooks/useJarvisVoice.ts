@@ -64,14 +64,24 @@ export function useJarvisVoice(options: UseJarvisVoiceOptions = {}): UseJarvisVo
   const [alwaysOn, setAlwaysOnState] = useState(options.alwaysOn ?? false)
   const [supported]                 = useState(isMediaRecorderSupported)
 
-  const stateRef         = useRef<VoiceState>('idle')
-  const alwaysOnRef      = useRef(options.alwaysOn ?? false)
-  const audioCtxRef      = useRef<AudioContext | null>(null)
-  const mediaStreamRef   = useRef<MediaStream | null>(null)
-  const recorderRef      = useRef<MediaRecorder | null>(null)
-  const onTranscriptRef  = useRef(onTranscript)
-  const onReplyRef       = useRef(onReply)
-  const onStateChangeRef = useRef(onStateChange)
+  const stateRef           = useRef<VoiceState>('idle')
+  const alwaysOnRef        = useRef(options.alwaysOn ?? false)
+  const audioCtxRef        = useRef<AudioContext | null>(null)
+  const mediaStreamRef     = useRef<MediaStream | null>(null)
+  const recorderRef        = useRef<MediaRecorder | null>(null)
+  const silenceTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const analyserRef        = useRef<AnalyserNode | null>(null)
+  const silencePollRef     = useRef<ReturnType<typeof setInterval> | null>(null)
+  const onTranscriptRef    = useRef(onTranscript)
+  const onReplyRef         = useRef(onReply)
+  const onStateChangeRef   = useRef(onStateChange)
+
+  // ── Silence detection constants ───────────────────────────────────────────
+  // Stop recording after SILENCE_MS of audio below SILENCE_THRESHOLD.
+  // MIN_SPEECH_MS prevents instant cutoff if user hasn't started talking yet.
+  const SILENCE_THRESHOLD = 10   // 0-255 RMS scale
+  const SILENCE_MS        = 1800 // 1.8s of quiet → auto-submit
+  const MIN_SPEECH_MS     = 600  // must speak for at least 600ms before silence can trigger
 
   useEffect(() => { onTranscriptRef.current = onTranscript }, [onTranscript])
   useEffect(() => { onReplyRef.current = onReply }, [onReply])
@@ -80,6 +90,7 @@ export function useJarvisVoice(options: UseJarvisVoiceOptions = {}): UseJarvisVo
 
   useEffect(() => {
     return () => {
+      stopSilenceDetection()
       stopRecording()
       releaseStream()
       const ctx = audioCtxRef.current
@@ -101,7 +112,14 @@ export function useJarvisVoice(options: UseJarvisVoiceOptions = {}): UseJarvisVo
     return audioCtxRef.current
   }
 
+  function stopSilenceDetection() {
+    if (silencePollRef.current) { clearInterval(silencePollRef.current); silencePollRef.current = null }
+    if (silenceTimerRef.current) { clearTimeout(silenceTimerRef.current); silenceTimerRef.current = null }
+    if (analyserRef.current) { try { analyserRef.current.disconnect() } catch { /* ignore */ } analyserRef.current = null }
+  }
+
   function stopRecording() {
+    stopSilenceDetection()
     const rec = recorderRef.current
     if (rec && rec.state !== 'inactive') {
       try { rec.stop() } catch { /* ignore */ }
@@ -205,7 +223,10 @@ export function useJarvisVoice(options: UseJarvisVoiceOptions = {}): UseJarvisVo
     })
       .then(async (res) => {
         if (!res.ok) { setError(`HTTP ${res.status}`); setState('error'); return }
-        const data = (await res.json()) as TelegramResponse
+        // Stream response — keepalive newlines + final JSON line
+        const raw = await res.text()
+        const lastLine = raw.split('\n').filter(l => l.trim()).pop() ?? ''
+        const data = (lastLine ? JSON.parse(lastLine) : { ok: false }) as TelegramResponse
         const replyText = data.reply ?? ''
         if (!replyText) { setState(alwaysOnRef.current ? 'listening' : 'idle'); return }
         setReply(replyText)
@@ -283,6 +304,41 @@ export function useJarvisVoice(options: UseJarvisVoiceOptions = {}): UseJarvisVo
         }
 
         recorder.start()
+
+        // ── Silence detection via AnalyserNode ───────────────────────────
+        try {
+          const ctx = getAudioContext()
+          const source = ctx.createMediaStreamSource(stream)
+          const analyser = ctx.createAnalyser()
+          analyser.fftSize = 512
+          source.connect(analyser)
+          analyserRef.current = analyser
+
+          const buf = new Uint8Array(analyser.frequencyBinCount)
+          const startedAt = Date.now()
+          let silenceSince: number | null = null
+
+          silencePollRef.current = setInterval(() => {
+            if (stateRef.current !== 'listening') { stopSilenceDetection(); return }
+            analyser.getByteFrequencyData(buf)
+            const rms = buf.reduce((s, v) => s + v, 0) / buf.length
+            const elapsed = Date.now() - startedAt
+
+            if (rms < SILENCE_THRESHOLD) {
+              if (elapsed > MIN_SPEECH_MS) {
+                if (silenceSince === null) silenceSince = Date.now()
+                else if (Date.now() - silenceSince >= SILENCE_MS) {
+                  stopSilenceDetection()
+                  stopListening() // auto-submit
+                }
+              }
+            } else {
+              silenceSince = null // reset on speech
+            }
+          }, 100)
+        } catch { /* analyser is best-effort — don't break recording if it fails */ }
+        // ── End silence detection ─────────────────────────────────────────
+
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err)

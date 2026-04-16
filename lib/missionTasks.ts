@@ -15,7 +15,7 @@ import path from 'node:path'
 export const MISSION_TASKS_PATH =
   'C:\\Users\\bobel\\.openclaw\\workspace-vault\\state\\mission-tasks.json'
 
-export type TaskStatus = 'open' | 'in_progress' | 'done' | 'blocked'
+export type TaskStatus = 'open' | 'in_progress' | 'done' | 'blocked' | 'awaiting_approval'
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low'
 
 export interface MissionTask {
@@ -32,6 +32,7 @@ export interface MissionTask {
   proof?:      string          // URL, file path, or verified quote on done
   agentReport?: string         // the agent's final message / output
   blockedReason?: string
+  approvalPayload?: string     // draft content waiting for Bo's approval
 }
 
 export interface MissionTasksFile {

@@ -178,12 +178,35 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 
+function useDemoMode(): [boolean, () => void] {
+  const [demo, setDemo] = useState(false)
+
+  useEffect(() => {
+    try {
+      setDemo(localStorage.getItem('jarvis_demo_mode') === '1')
+    } catch {
+      // localStorage unavailable (SSR / sandboxed)
+    }
+  }, [])
+
+  const toggle = () => {
+    setDemo((prev) => {
+      const next = !prev
+      try { localStorage.setItem('jarvis_demo_mode', next ? '1' : '0') } catch { /* ignore */ }
+      return next
+    })
+  }
+
+  return [demo, toggle]
+}
+
 export default function MissionControlPage() {
   const jarvis = useJarvisStatus(30_000)
   const [tab, setTab] = useState<Tab>('chat')
+  const [demo, toggleDemo] = useDemoMode()
 
   return (
-    <div className="mc-root">
+    <div className={`mc-root${demo ? ' demo-mode' : ''}`}>
       <div className="mc-grid-bg" />
       <div className="mc-scanlines" />
       <div className="mc-scanbar" />
@@ -192,19 +215,35 @@ export default function MissionControlPage() {
         <TopBar bridgeUp={jarvis.ok} />
 
         {/* Main content */}
-        <div className="flex-1 min-h-0 flex flex-col md:flex-row p-3 gap-3 overflow-hidden">
+        <div className={`flex-1 min-h-0 flex flex-col md:flex-row p-3 gap-3 overflow-hidden mc-demo-center`}>
 
-          {/* LEFT RAIL — Jarvis card + Calendar (desktop only) */}
-          <aside className="hidden md:flex flex-col gap-3 w-[280px] shrink-0">
+          {/* LEFT RAIL — full calendar (desktop only, hidden in demo mode) */}
+          <aside className="mc-left-rail hidden md:flex flex-col gap-3 w-[320px] shrink-0">
             <JarvisCard status={jarvis} />
             <div className="flex-1 min-h-0 overflow-hidden">
-              <CalendarPanel />
+              <CalendarPanel fullHeight />
             </div>
           </aside>
 
           {/* RIGHT MAIN — tabbed content */}
           <div className="flex-1 min-h-0 flex flex-col mc-panel mc-corners overflow-hidden">
-            <TabBar active={tab} onChange={setTab} />
+            {/* Tab bar + demo toggle */}
+            <div className="flex items-center border-b border-[var(--mc-border)]">
+              <div className="flex-1">
+                <TabBar active={tab} onChange={setTab} />
+              </div>
+              <button
+                onClick={toggleDemo}
+                className={`mc-demo-btn mc-mono text-[10px] tracking-widest px-3 py-1 border rounded mr-3 shrink-0 transition-colors ${
+                  demo
+                    ? 'text-[var(--mc-cyan)] border-[rgba(0,212,255,0.60)] bg-[rgba(0,212,255,0.10)]'
+                    : 'text-[var(--mc-text-mute)] border-[var(--mc-border)] hover:border-[var(--mc-cyan)] hover:text-[var(--mc-cyan)]'
+                }`}
+                title="Toggle demo mode (iPhone viewport)"
+              >
+                {demo ? 'EXIT DEMO' : 'DEMO MODE'}
+              </button>
+            </div>
 
             <div className="flex-1 min-h-0 overflow-hidden">
               {tab === 'chat' && (

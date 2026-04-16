@@ -37,10 +37,11 @@ interface AgentProfile {
 }
 
 const STATUS_COLOR: Record<MissionTask['status'], string> = {
-  open:        '#efb356',
-  in_progress: '#00d4ff',
-  done:        '#22c55e',
-  blocked:     '#ff6060',
+  open:              '#efb356',
+  in_progress:       '#00d4ff',
+  done:              '#22c55e',
+  blocked:           '#ff6060',
+  awaiting_approval: '#a855f7',
 }
 
 function ageStr(ts: number | null): string {

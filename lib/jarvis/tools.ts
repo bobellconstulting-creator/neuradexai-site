@@ -29,6 +29,10 @@ import {
   syncCalendarToVaultSchema,
   calculateEarnings,
   calculateEarningsSchema,
+  readDoc,
+  readDocSchema,
+  queueResearch,
+  queueResearchSchema,
 } from './tools-fs'
 import {
   createCalendarEvent,
@@ -88,6 +92,10 @@ export {
   syncCalendarToVaultSchema,
   calculateEarnings,
   calculateEarningsSchema,
+  readDoc,
+  readDocSchema,
+  queueResearch,
+  queueResearchSchema,
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
@@ -293,7 +301,7 @@ export const browserLoginSchema = z.object({
 })
 export type BrowserLoginArgs = z.infer<typeof browserLoginSchema>
 
-export const speakVoiceEnum = z.enum(['alan'])
+export const speakVoiceEnum = z.enum(['alan', 'adam'])
 export type SpeakVoice = z.infer<typeof speakVoiceEnum>
 
 export const listenSchema = z.object({
@@ -831,7 +839,66 @@ export async function speak(raw: unknown): Promise<ToolResult<SpeakResult>> {
 
   const { text, outPath, voice, sendToTelegram, telegramChatId } = parsed.data
 
-  const voiceFile = PIPER_VOICES[voice]
+  // ── ElevenLabs path (paid, opt-in only) ──────────────────────────────────
+  const useElevenLabs =
+    !!process.env.ELEVENLABS_API_KEY &&
+    (voice === 'adam' || process.env.JARVIS_VOICE_ENGINE === 'elevenlabs')
+
+  if (useElevenLabs) {
+    await fs.mkdir(SPEECH_OUT_DIR, { recursive: true })
+    const mp3Path =
+      outPath && outPath.length > 0
+        ? outPath
+        : path.join(SPEECH_OUT_DIR, `${Date.now()}.mp3`)
+    await fs.mkdir(path.dirname(mp3Path), { recursive: true })
+
+    try {
+      const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
+      const ttsRes = await fetch(`${baseUrl}/api/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+        signal: AbortSignal.timeout(60_000),
+      })
+      if (!ttsRes.ok) {
+        const errBody = await ttsRes.text().catch(() => '')
+        const r = mkReceipt('speak', false, `elevenlabs /api/tts ${ttsRes.status}: ${errBody.slice(0, 120)}`)
+        await appendReceipt(r)
+        return { ok: false, error: `ElevenLabs TTS failed: ${ttsRes.status}`, receipt: r }
+      }
+      const audioBytes = Buffer.from(await ttsRes.arrayBuffer())
+      await fs.writeFile(mp3Path, audioBytes)
+      const sizeBytes = audioBytes.length
+      const durationMs = Math.round((sizeBytes / 128_000) * 8 * 1000) // rough estimate for mp3
+
+      let telegram: SpeakResult['telegram']
+      if (sendToTelegram) {
+        const chatId = telegramChatId ?? TELEGRAM_DEFAULT_CHAT_ID
+        telegram = await sendTelegramVoice(mp3Path, chatId)
+      }
+
+      const receipt = mkReceipt(
+        'speak',
+        true,
+        `voice=adam(elevenlabs) path=${mp3Path} size=${sizeBytes} durMs=${durationMs}${
+          telegram ? ` tg=${telegram.sent ? telegram.method : 'fail:' + telegram.error} ` : ''
+        }text="${text.slice(0, 40)}"`
+      )
+      await appendReceipt(receipt)
+      return {
+        ok: true,
+        result: { path: mp3Path, durationMs, sizeBytes, voice: 'adam', telegram },
+        receipt,
+      }
+    } catch (e) {
+      const r = mkReceipt('speak', false, `elevenlabs error: ${getErrorMessage(e).slice(0, 120)}`)
+      await appendReceipt(r)
+      return { ok: false, error: getErrorMessage(e), receipt: r }
+    }
+  }
+  // ── /ElevenLabs path ─────────────────────────────────────────────────────
+
+  const voiceFile = PIPER_VOICES[voice as 'alan']
   if (!voiceFile) {
     const r = mkReceipt('speak', false, `unknown voice alias: ${voice}`)
     await appendReceipt(r)
@@ -1089,16 +1156,13 @@ export async function listen(raw: unknown): Promise<ToolResult<ListenResult>> {
 // At Bo's discretion only — Jarvis NEVER auto-triggers this. Wait for Bo to
 // explicitly say "use Claude Code" / "delegate to Claude" etc.
 //
-// Uses claude.cmd (npm-installed Claude Code CLI on Windows). Runs with
-// --print for non-interactive mode, --no-session-persistence so it doesn't
-// inherit or pollute Jarvis's context.
-//
-// Budget cap: defaults to $0.50. Bo controls this per-task via `budgetUsd`.
-// Never goes above $2.00 without an explicit override.
+// Spawns: claude --print --no-update "<task>" via cmd /c on Windows.
+// Timeout: 120 seconds hard cap.
+// Output: truncated to 4000 chars.
 // ──────────────────────────────────────────────────────────────────────────
 
-const CLAUDE_CLI = 'C:/Users/bobel/AppData/Roaming/npm/claude.cmd'
 const CLAUDE_DEFAULT_CWD = 'C:/Users/bobel/projects/neuradexai'
+const CLAUDE_TIMEOUT_MS = 120_000
 
 export const delegateToClaudeCodeSchema = z.object({
   task: z.string().min(1).max(8000),
@@ -1109,7 +1173,6 @@ export const delegateToClaudeCodeSchema = z.object({
 interface ClaudeCodeResult {
   output: string
   exitCode: number | null
-  budgetUsd: number
 }
 
 export async function delegateToClaudeCode(raw: unknown): Promise<ToolResult<ClaudeCodeResult>> {
@@ -1120,35 +1183,55 @@ export async function delegateToClaudeCode(raw: unknown): Promise<ToolResult<Cla
     return { ok: false, error: parsed.error.message, receipt: r }
   }
 
-  const { task, cwd, budgetUsd } = parsed.data
+  const { task, cwd } = parsed.data
   const workDir = cwd || CLAUDE_DEFAULT_CWD
 
-  const res = await runChild(
-    CLAUDE_CLI,
-    [
-      '--print',
-      '--output-format', 'text',
-      '--max-budget-usd', String(budgetUsd),
-      '--no-session-persistence',
-      task,
-    ],
-    { cwd: workDir, timeoutMs: 300_000 }
-  )
+  const contextPrefix = [
+    `Working directory: ${workDir}`,
+    'Project: Neuradex AI (Next.js 14, TypeScript, Tailwind)',
+    `Task: ${task}`,
+    '',
+    'Respond with only the changes made and file paths. Be concise.',
+  ].join('\n')
 
-  if (res.timedOut) {
-    const r = mkReceipt('delegateToClaudeCode', false, `claude CLI timeout (5 min) task="${task.slice(0, 60)}"`)
-    await appendReceipt(r)
-    return { ok: false, error: 'claude CLI timeout after 5 minutes', receipt: r }
+  // Try `claude` directly first; if spawn error, fall back to `cmd /c claude`
+  async function attempt(useCmd: boolean): Promise<SpawnResult> {
+    if (useCmd) {
+      return runChild(
+        process.env.ComSpec || 'cmd.exe',
+        ['/c', 'claude', '--print', '--no-update', contextPrefix],
+        { cwd: workDir, timeoutMs: CLAUDE_TIMEOUT_MS }
+      )
+    }
+    return runChild(
+      'claude',
+      ['--print', '--no-update', contextPrefix],
+      { cwd: workDir, timeoutMs: CLAUDE_TIMEOUT_MS }
+    )
   }
 
-  const output = (res.stdout || '').trim() || (res.stderr || '').trim()
+  let res = await attempt(false)
+
+  // SPAWN_ERROR means the binary wasn't found — retry via cmd /c
+  if (!res.timedOut && res.code !== 0 && res.stderr.includes('SPAWN_ERROR')) {
+    res = await attempt(true)
+  }
+
+  if (res.timedOut) {
+    const r = mkReceipt('delegateToClaudeCode', false, `claude CLI timeout (120s) task="${task.slice(0, 60)}"`)
+    await appendReceipt(r)
+    return { ok: false, error: 'delegateToClaudeCode failed: timeout after 120 seconds', receipt: r }
+  }
+
+  const output = truncate((res.stdout || '').trim() || (res.stderr || '').trim(), 4000)
 
   if (res.code !== 0) {
-    const r = mkReceipt('delegateToClaudeCode', false, `claude exit=${res.code} stderr=${(res.stderr || '').slice(0, 120)}`)
+    const reason = (res.stderr || '').slice(0, 300) || `exit ${res.code}`
+    const r = mkReceipt('delegateToClaudeCode', false, `claude exit=${res.code} stderr=${reason.slice(0, 120)}`)
     await appendReceipt(r)
     return {
       ok: false,
-      error: `claude exited with code ${res.code}: ${(res.stderr || '').slice(0, 500)}`,
+      error: `delegateToClaudeCode failed: ${reason}`,
       receipt: r,
     }
   }
@@ -1156,13 +1239,13 @@ export async function delegateToClaudeCode(raw: unknown): Promise<ToolResult<Cla
   const r = mkReceipt(
     'delegateToClaudeCode',
     true,
-    `budget=$${budgetUsd} exit=${res.code} cwd=${workDir} task="${task.slice(0, 60)}"`
+    `exit=${res.code} cwd=${workDir} task="${task.slice(0, 60)}"`
   )
   await appendReceipt(r)
 
   return {
     ok: true,
-    result: { output: truncate(output, 8000), exitCode: res.code, budgetUsd },
+    result: { output, exitCode: res.code },
     receipt: r,
   }
 }
@@ -1271,6 +1354,18 @@ export const JARVIS_TOOLS: Record<string, ToolEntry> = {
     description: 'Write or append to a text file on the local filesystem. Creates parent directories if needed.',
     schema: writeDocSchema,
     run: writeDoc,
+  },
+  readDoc: {
+    name: 'readDoc',
+    description: 'Read the contents of a file from the COG Obsidian vault. Path is relative to vault root (e.g. "RESEARCH-QUEUE.md" or "00-inbox/MY-INTERESTS.md").',
+    schema: readDocSchema,
+    run: readDoc,
+  },
+  queueResearch: {
+    name: 'queueResearch',
+    description: 'Add a topic to the research queue (COG/RESEARCH-QUEUE.md). Jarvis will research it automatically overnight. Use when Bo asks to "queue up", "add to research list", or "look into later".',
+    schema: queueResearchSchema,
+    run: queueResearch,
   },
   createCalendarEvent: {
     name: 'createCalendarEvent',
