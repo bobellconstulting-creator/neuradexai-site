@@ -208,7 +208,7 @@ COLD ANCHORS:
 
       if (message && reply) {
         reflect(`Bo: ${message}\n\nJarvis: ${outgoing}`)
-          .then(async (r) => { await persistReflectionResult(r, `Bo: ${message}\n\nJarvis: ${outgoing}`); invalidateMemoryCache() })
+          .then(async (r) => { await persistReflectionResult(r); invalidateMemoryCache() })
           .catch(() => {})
       }
     } catch (e) {
