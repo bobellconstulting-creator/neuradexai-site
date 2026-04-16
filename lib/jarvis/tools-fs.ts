@@ -9,6 +9,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import type { ToolResult } from './tools'
 import { getUpcomingEvents, type CalendarEvent } from '@/lib/google/calendar'
+import { callBridge, bridgeAvailable } from './bridge-client'
 
 // ──────────────────────────────────────────────────────────────────────────
 // Constants
@@ -120,6 +121,22 @@ export async function writeDoc(
     return { ok: false, error: parsed.error.message, receipt: r }
   }
   const { path: filePath, content, append } = parsed.data
+
+  // ── Bridge path (Vercel → Bo's PC) ──────────────────────────────────────
+  if (bridgeAvailable()) {
+    const toolName = append ? 'appendNote' : 'writeDoc'
+    const br = await callBridge<{ written?: string; appended?: string; bytes: number }>(
+      toolName,
+      { path: filePath, content },
+    )
+    if (br.ok && br.result) {
+      const bytes = br.result.bytes
+      const r = mkReceipt('writeDoc', true, `bridge: ${append ? 'appended' : 'wrote'} ${bytes}B to ${filePath}`)
+      return { ok: true, result: { path: filePath, bytes }, receipt: r }
+    }
+    // Bridge failed — fall through to direct fs (useful in local dev)
+  }
+
   try {
     // Ensure parent directory exists before writing.
     await fs.mkdir(path.dirname(filePath), { recursive: true })
@@ -269,10 +286,27 @@ export async function readDoc(
     return { ok: false, error: parsed.error.message, receipt: r }
   }
 
-  // Sanitize: strip leading slashes, resolve within COG root, no traversal
-  const rel = parsed.data.path.replace(/^[/\\]+/, '')
-  const fullPath = path.join(COG_ROOT, rel)
-  if (!fullPath.startsWith(path.resolve(COG_ROOT))) {
+  const inputPath = parsed.data.path
+
+  // ── Bridge path (Vercel → Bo's PC) ──────────────────────────────────────
+  if (bridgeAvailable()) {
+    const br = await callBridge<{ path: string; content: string; bytes: number }>(
+      'readDoc',
+      { path: inputPath },
+    )
+    if (br.ok && br.result) {
+      const r = mkReceipt('readDoc', true, `bridge: read ${br.result.bytes}B from ${inputPath}`)
+      return { ok: true, result: br.result, receipt: r }
+    }
+    // Fall through to direct fs
+  }
+
+  // Sanitize: strip leading slashes, resolve within COG root, no traversal.
+  const fullPath = path.isAbsolute(inputPath)
+    ? path.resolve(inputPath)
+    : path.resolve(COG_ROOT, inputPath.replace(/^[/\\]+/, ''))
+  const relative = path.relative(path.resolve(COG_ROOT), fullPath)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     const r = mkReceipt('readDoc', false, 'path traversal denied')
     await appendReceipt(r)
     return { ok: false, error: 'path traversal denied', receipt: r }
@@ -311,6 +345,19 @@ export async function queueResearch(
   const meta = notes ? `, notes: ${notes}` : ''
   const priorityFlag = priority === 'high' ? ' ⚡' : ''
   const line = `- [ ]${priorityFlag} ${topic} <!-- added: ${added}${meta} -->\n`
+
+  // ── Bridge path (Vercel → Bo's PC) ──────────────────────────────────────
+  if (bridgeAvailable()) {
+    const br = await callBridge<{ queued: string; priority: string; file: string }>(
+      'queueResearch',
+      { topic, priority: priority ?? 'normal' },
+    )
+    if (br.ok) {
+      const r = mkReceipt('queueResearch', true, `bridge: queued "${topic}"`)
+      return { ok: true, result: { topic, queuePath: br.result?.file ?? RESEARCH_QUEUE_PATH, position: 1 }, receipt: r }
+    }
+    // Fall through to direct fs
+  }
 
   try {
     await fs.mkdir(path.dirname(RESEARCH_QUEUE_PATH), { recursive: true })
