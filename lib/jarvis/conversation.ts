@@ -14,6 +14,7 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
+import { callBridge, bridgeAvailable } from './bridge-client'
 
 const VAULT_ROOT = process.env.JARVIS_VAULT_ROOT ?? 'C:/Users/bobel/COG'
 const CHATS_DIR = path.join(VAULT_ROOT, '01-daily', 'chats')
@@ -76,6 +77,17 @@ async function readIfExists(filePath: string): Promise<string | null> {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw err
   }
+}
+
+async function readFileViaBridge(filePath: string): Promise<string | null> {
+  if (bridgeAvailable()) {
+    const br = await callBridge<{ content?: string }>('readDoc', { path: filePath }).catch(() => null)
+    if (br?.ok && typeof br.result === 'object' && br.result !== null && 'content' in br.result) {
+      return (br.result as { content: string }).content
+    }
+    return null
+  }
+  return readIfExists(filePath)
 }
 
 // ─── LRU cache ─────────────────────────────────────────────────────────────
@@ -193,8 +205,17 @@ export async function appendTurn(
 
   const ymd = ymdFromIso(turn.ts)
   const jsonlFile = chatDayFile(id, ymd)
-  await ensureDir(path.dirname(jsonlFile))
-  await fs.appendFile(jsonlFile, serializeTurn(turn), 'utf8')
+  const serialized = serializeTurn(turn)
+  if (bridgeAvailable()) {
+    // On Vercel: route through local bridge
+    await callBridge('appendNote', { path: jsonlFile, content: serialized }).catch((e) => {
+      console.warn('[conversation] bridge append failed:', (e as Error).message)
+    })
+  } else {
+    // Local dev: direct filesystem
+    await ensureDir(path.dirname(jsonlFile))
+    await fs.appendFile(jsonlFile, serialized, 'utf8')
+  }
 
   // Best-effort MD mirror — don't fail the whole append if MD write hiccups.
   try {
@@ -223,7 +244,7 @@ export async function getHistory(chatId: string, limit = 20): Promise<Turn[]> {
   if (cached) {
     turns = cached
   } else {
-    const raw = await readIfExists(chatDayFile(id, today))
+    const raw = await readFileViaBridge(chatDayFile(id, today))
     turns = raw ? parseJsonlFile(raw) : []
     cacheSet(id, today, turns)
   }
@@ -234,7 +255,7 @@ export async function getHistory(chatId: string, limit = 20): Promise<Turn[]> {
   const y = new Date()
   y.setDate(y.getDate() - 1)
   const yesterday = todayYmd(y)
-  const rawYest = await readIfExists(chatDayFile(id, yesterday))
+  const rawYest = await readFileViaBridge(chatDayFile(id, yesterday))
   const yestTurns = rawYest ? parseJsonlFile(rawYest) : []
   const merged = [...yestTurns, ...turns]
   return merged.slice(-limit)
