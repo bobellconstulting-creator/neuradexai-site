@@ -27,7 +27,8 @@ const NIGHTLY_FALLBACK = 'Evening, Bo. Day wrapped. Ready for tomorrow.'
 const MORNING_BRIEF_INSTRUCTION =
   'Morning brief: Check my calendar for today using getCalendar. Check COG/RESEARCH-QUEUE.md for any queued items using readDoc. ' +
   'Give me a 3-sentence morning brief: (1) what\'s on the calendar today, (2) any blocked or pending items from the queue, ' +
-  '(3) one thing you\'re watching or ready to help with. British JARVIS voice, no lists, plain text only.'
+  '(3) one thing you\'re watching or ready to help with. British JARVIS voice, no lists, plain text only.' +
+  ' Also read COG/REVENUE_INTEL.md using readDoc and include ONE specific revenue action Bo should take today (one sentence, concrete).'
 
 // Today's daily note path is built at runtime inside the handler.
 function buildNightlyInstruction(): string {

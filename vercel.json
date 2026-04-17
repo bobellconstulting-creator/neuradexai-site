@@ -3,7 +3,11 @@
   "crons": [
     {
       "path": "/api/jarvis/wakeup",
-      "schedule": "0 3 * * *"
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/jarvis/wakeup",
+      "schedule": "0 0 * * *"
     },
     {
       "path": "/api/jarvis/task-runner",
@@ -11,11 +15,15 @@
     },
     {
       "path": "/api/jarvis/instinct-review",
-      "schedule": "0 4 * * *"
+      "schedule": "30 4 * * *"
     },
     {
       "path": "/api/jarvis/nightly-synthesis",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/jarvis/buckgrid-growth",
+      "schedule": "0 13 * * 0"
     }
   ]
 }

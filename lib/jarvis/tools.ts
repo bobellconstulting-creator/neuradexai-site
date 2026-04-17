@@ -69,7 +69,32 @@ import {
   systemInfoSchema,
   vercelDeploy,
   vercelDeploySchema,
+  telegramPollIdeas,
+  telegramPollIdeasSchema,
 } from './tools-web'
+import { sendEmail, sendEmailSchema, readEmail, readEmailSchema } from './tools-email'
+import { createEtsyListing, createEtsyListingSchema } from './tools-etsy'
+import { findProspects, findProspectsSchema } from './tools-consulting'
+import { runClaudeCode, runClaudeCodeSchema } from './tools-claude-code'
+import {
+  storeCredential,
+  storeCredentialSchema,
+  getCredential,
+  getCredentialSchema,
+  listCredentials,
+  listCredentialsSchema,
+} from './tools-vault'
+
+export {
+  storeCredential,
+  storeCredentialSchema,
+  getCredential,
+  getCredentialSchema,
+  listCredentials,
+  listCredentialsSchema,
+}
+
+export { runClaudeCode, runClaudeCodeSchema }
 
 export {
   searchWeb,
@@ -84,6 +109,8 @@ export {
   systemInfoSchema,
   vercelDeploy,
   vercelDeploySchema,
+  telegramPollIdeas,
+  telegramPollIdeasSchema,
   createFolder,
   writeDoc,
   createFolderSchema,
@@ -1158,6 +1185,63 @@ export const JARVIS_TOOLS: Record<string, ToolEntry> = {
     description: "Execute a shell command on Bo's local machine via the local bridge server. Use when shellExec is BLOCKED on Vercel. Requires LOCAL_BRIDGE_URL and LOCAL_BRIDGE_SECRET env vars.",
     schema: localBridgeExecSchema,
     run: localBridgeExec,
+  },
+  sendEmail: {
+    name: 'sendEmail',
+    description: 'Send an email via Gmail SMTP. Use when Bo asks to email someone or send a notification. Requires SMTP_USER and SMTP_PASS env vars.',
+    schema: sendEmailSchema,
+    run: sendEmail,
+  },
+  readEmail: {
+    name: 'readEmail',
+    description: 'Read recent emails from Gmail inbox via IMAP. Returns sender, subject, and snippet for each message. Use when Bo asks to check email, read inbox, or when a cron job monitors for new mail. Requires SMTP_USER and SMTP_PASS env vars with IMAP enabled.',
+    schema: readEmailSchema,
+    run: readEmail,
+  },
+  createEtsyListing: {
+    name: 'createEtsyListing',
+    description: 'Create a DRAFT product listing on Printify (Etsy POD). Draft only — not published until Bo reviews. Requires PRINTIFY_API_KEY and PRINTIFY_SHOP_ID env vars.',
+    schema: createEtsyListingSchema,
+    run: createEtsyListing,
+  },
+  findProspects: {
+    name: 'findProspects',
+    description: 'Research potential consulting prospects via web search and write findings to COG/04-projects/neuradex-consulting/prospects.md. Use when Bo says "find me leads", "research prospects", or "who should I pitch".',
+    schema: findProspectsSchema,
+    run: findProspects,
+  },
+  storeCredential: {
+    name: 'storeCredential',
+    description:
+      'Store or update a credential in the local vault (~/.secrets/jarvis-vault.json). Upserts by service slug. Use when Bo creates a new account or rotates a password. Passwords are never logged.',
+    schema: storeCredentialSchema,
+    run: storeCredential,
+  },
+  getCredential: {
+    name: 'getCredential',
+    description:
+      'Retrieve a stored credential from the vault by service name. Returns username, password, url, notes, and updatedAt. For tool use only — never surface passwords in Telegram messages.',
+    schema: getCredentialSchema,
+    run: getCredential,
+  },
+  listCredentials: {
+    name: 'listCredentials',
+    description:
+      'List all services stored in the credential vault. Returns service names, usernames, urls, and timestamps. Passwords are NOT included in the list.',
+    schema: listCredentialsSchema,
+    run: listCredentials,
+  },
+  runClaudeCode: {
+    name: 'runClaudeCode',
+    description: 'Spawn Claude Code CLI to complete a coding task, build a feature, fix a bug, or run an analysis. Returns the full output. Use when Bo asks to build something, fix code, or when a task requires writing/running code. Requires claude CLI on PATH.',
+    schema: runClaudeCodeSchema,
+    run: runClaudeCode as (args: unknown) => Promise<ToolResult>,
+  },
+  telegramPollIdeas: {
+    name: 'telegramPollIdeas',
+    description: "Poll Telegram for new idea/capture/note messages from Bo. Returns new messages with prefix stripped. Used by the idea-capture cron. Automatically tracks offset to avoid reprocessing.",
+    schema: telegramPollIdeasSchema,
+    run: telegramPollIdeas as (args: unknown) => Promise<ToolResult>,
   },
 }
 

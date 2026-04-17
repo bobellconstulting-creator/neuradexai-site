@@ -148,12 +148,36 @@ async function checkOpenQuestions(result: ReflectionResult): Promise<void> {
   }
 }
 
+// ─── Check 4: Etsy opportunity scanner ──────────────────────────────────────
+
+const ETSY_KEYWORDS = ['etsy', 'listing', 'print', 'product', 'sell', 'store', 'shop', 'hunting', 'niche', 'merch']
+
+async function checkEtsyOpportunities(transcript: string): Promise<void> {
+  try {
+    const lower = transcript.toLowerCase()
+    const matched = ETSY_KEYWORDS.filter((kw) => lower.includes(kw))
+    if (matched.length < 2) return
+
+    const intelFile = path.join(VAULT_ROOT, 'REVENUE_INTEL.md')
+    const date = new Date().toISOString().slice(0, 10)
+    const line = `\n- [${date}] Etsy signal detected in conversation: ${matched.join(', ')}`
+
+    await fs.appendFile(intelFile, line, 'utf8')
+  } catch {
+    // non-throwing
+  }
+}
+
 // ─── Public entry point ──────────────────────────────────────────────────────
 
-export async function checkAndTriggerPatterns(result: ReflectionResult): Promise<void> {
+export async function checkAndTriggerPatterns(
+  result: ReflectionResult,
+  transcript?: string,
+): Promise<void> {
   await Promise.all([
     checkRepeatedMistakes(result),
     checkRevenueIntel(result),
     checkOpenQuestions(result),
+    checkEtsyOpportunities(transcript ?? ''),
   ])
 }

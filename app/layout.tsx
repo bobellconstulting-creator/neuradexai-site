@@ -27,12 +27,13 @@ export const metadata: Metadata = {
     title: 'Jarvis / Axon HUD',
     description: 'Private holographic mission control for Jarvis and Axon.',
   },
-  applicationName: 'Jarvis / Axon HUD',
+  applicationName: 'Jarvis',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'Jarvis / Axon HUD',
+    title: 'Jarvis',
   },
+  manifest: '/manifest.json',
   formatDetection: {
     telephone: false,
   },
@@ -46,6 +47,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   themeColor: '#000810',
+  viewportFit: 'cover',
 }
 
 export default function RootLayout({

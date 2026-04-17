@@ -52,6 +52,12 @@ export default function JarvisPage() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
+  }, [])
+
   const fetchTasks = useCallback(async () => {
     setTasksLoading(true)
     try {

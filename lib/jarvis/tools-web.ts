@@ -13,6 +13,8 @@
 import { z } from 'zod'
 import os from 'node:os'
 import { execSync } from 'node:child_process'
+import { promises as fs } from 'node:fs'
+import path from 'node:path'
 
 // ──────────────────────────────────────────────────────────────────────────
 // Shared result type (mirrors ToolResult in tools.ts — receipt is required)
@@ -380,4 +382,115 @@ export async function vercelDeploy(raw: unknown): Promise<WebToolResult> {
     state: deployData.readyState,
     receipt: `vercelDeploy: ${target} triggered → ${deployData.url}`,
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// telegramPollIdeas — poll for idea/capture/note messages from Bo
+// ──────────────────────────────────────────────────────────────────────────
+
+const TELEGRAM_IDEA_STATE_FILE = 'C:/Users/bobel/.openclaw-jarvis/.state/telegram-idea-offset.json'
+const BO_CHAT_ID = 7240677590
+const IDEA_PREFIX_RE = /^(idea|capture|note):\s*/i
+
+export const telegramPollIdeasSchema = z.object({
+  // no required args — reads offset from state file
+  maxMessages: z.number().int().min(1).max(20).default(10),
+})
+
+export interface IdeaMessage {
+  updateId: number
+  text: string        // stripped of prefix (e.g. "idea: refactor" → "refactor")
+  rawText: string     // full original message text
+  receivedAt: string  // ISO string
+}
+
+interface TelegramUpdate {
+  update_id: number
+  message?: {
+    message_id: number
+    chat: { id: number }
+    text?: string
+    date: number
+  }
+}
+
+interface OffsetState {
+  lastUpdateId: number
+}
+
+async function loadIdeaOffset(): Promise<OffsetState> {
+  try {
+    const raw = await fs.readFile(TELEGRAM_IDEA_STATE_FILE, 'utf8')
+    return JSON.parse(raw) as OffsetState
+  } catch {
+    // File missing or unparseable — start from beginning
+    return { lastUpdateId: 0 }
+  }
+}
+
+async function saveIdeaOffset(state: OffsetState): Promise<void> {
+  await fs.mkdir(path.dirname(TELEGRAM_IDEA_STATE_FILE), { recursive: true })
+  await fs.writeFile(TELEGRAM_IDEA_STATE_FILE, JSON.stringify(state, null, 2), 'utf8')
+}
+
+export async function telegramPollIdeas(raw: unknown): Promise<WebToolResult> {
+  const { maxMessages } = telegramPollIdeasSchema.parse(raw)
+
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  if (!token) return fail('telegramPollIdeas', 'TELEGRAM_BOT_TOKEN not set')
+
+  const state = await loadIdeaOffset()
+
+  // Fetch up to 100 updates past the stored offset so we drain the backlog
+  // fully and capture all non-idea messages for offset advancement too.
+  const apiUrl =
+    `https://api.telegram.org/bot${token}/getUpdates` +
+    `?offset=${state.lastUpdateId + 1}&limit=100&allowed_updates=${encodeURIComponent('["message"]')}`
+
+  const res = await fetch(apiUrl, { signal: AbortSignal.timeout(15_000) })
+
+  if (!res.ok) {
+    const body = await res.text()
+    return fail('telegramPollIdeas', `Telegram API error: ${res.status} ${body.slice(0, 200)}`)
+  }
+
+  const data = await res.json() as { ok: boolean; result?: TelegramUpdate[]; description?: string }
+
+  if (!data.ok || !data.result) {
+    return fail('telegramPollIdeas', `Telegram returned ok=false: ${data.description ?? 'unknown'}`)
+  }
+
+  const updates = data.result
+
+  // Always advance offset to the max update_id seen — even for non-idea messages —
+  // so future polls don't re-scan already-processed updates.
+  if (updates.length > 0) {
+    const maxId = Math.max(...updates.map((u) => u.update_id))
+    if (maxId > state.lastUpdateId) {
+      await saveIdeaOffset({ lastUpdateId: maxId })
+    }
+  }
+
+  // Filter to Bo's messages that start with idea/capture/note prefix
+  const ideas: IdeaMessage[] = []
+  for (const update of updates) {
+    if (!update.message) continue
+    if (update.message.chat.id !== BO_CHAT_ID) continue
+    const text = update.message.text ?? ''
+    if (!IDEA_PREFIX_RE.test(text)) continue
+
+    ideas.push({
+      updateId: update.update_id,
+      text: text.replace(IDEA_PREFIX_RE, '').trim(),
+      rawText: text,
+      receivedAt: new Date(update.message.date * 1000).toISOString(),
+    })
+
+    if (ideas.length >= maxMessages) break
+  }
+
+  const newOffset = updates.length > 0 ? Math.max(...updates.map((u) => u.update_id)) : state.lastUpdateId
+  const receipt = `${new Date().toISOString()} telegramPollIdeas OK :: ${ideas.length} idea${ideas.length === 1 ? '' : 's'} captured (offset: ${newOffset})`
+
+  return { ok: true, ideas, receipt }
 }

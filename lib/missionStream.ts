@@ -18,6 +18,15 @@ import { BOARDROOM, officeChannel } from '@/lib/missionChannels'
 export { BOARDROOM, officeChannel } from '@/lib/missionChannels'
 export type { MissionMessage, ChannelId, MessageRole, MessageStatus, MessageVisibility } from '@/lib/missionChannels'
 
+// In-memory fallback for Vercel deployment (local file paths not accessible in cloud)
+const IS_VERCEL = process.env.VERCEL === '1'
+let memoryStore: MissionStreamFile | null = null
+
+function getMemoryStore(): MissionStreamFile {
+  if (!memoryStore) memoryStore = { ...DEFAULT_FILE, messages: [] }
+  return memoryStore
+}
+
 export const MISSION_STREAM_PATH =
   'C:\\Users\\bobel\\.openclaw\\workspace-vault\\state\\mission-stream.json'
 
@@ -55,9 +64,11 @@ async function ensureFile(): Promise<void> {
 }
 
 export async function readStream(): Promise<MissionStreamFile> {
+  if (IS_VERCEL) return getMemoryStore()
   await ensureFile()
   const raw = await readFile(MISSION_STREAM_PATH, 'utf8')
   try {
+    if (!raw.trim()) throw new Error('empty')
     const parsed = JSON.parse(raw) as MissionStreamFile
     if (!parsed.messages) parsed.messages = []
     // Migration: any legacy messages without a `channel` get put in the boardroom
@@ -72,6 +83,17 @@ export async function readStream(): Promise<MissionStreamFile> {
     if (migrated) await writeStream(parsed)
     return parsed
   } catch {
+    // One retry after 100ms — handles the brief window during atomic rename
+    // when the file can appear empty to a concurrent reader.
+    await new Promise((r) => setTimeout(r, 100))
+    try {
+      const retryRaw = await readFile(MISSION_STREAM_PATH, 'utf8').catch(() => '')
+      if (retryRaw.trim()) {
+        const retryParsed = JSON.parse(retryRaw) as MissionStreamFile
+        if (!retryParsed.messages) retryParsed.messages = []
+        return retryParsed
+      }
+    } catch { /* fall through to corrupt-file rewrite */ }
     // Corrupt file — rewrite with empty default to self-heal
     await writeStream({ ...DEFAULT_FILE })
     return { ...DEFAULT_FILE }
@@ -79,6 +101,7 @@ export async function readStream(): Promise<MissionStreamFile> {
 }
 
 async function writeStream(file: MissionStreamFile): Promise<void> {
+  if (IS_VERCEL) { memoryStore = file; return }
   await mkdir(path.dirname(MISSION_STREAM_PATH), { recursive: true })
   const tmp = `${MISSION_STREAM_PATH}.tmp`
   await writeFile(tmp, JSON.stringify(file, null, 2), 'utf8')
