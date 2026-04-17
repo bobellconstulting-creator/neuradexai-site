@@ -24,6 +24,18 @@
     {
       "path": "/api/jarvis/buckgrid-growth",
       "schedule": "0 13 * * 0"
+    },
+    {
+      "path": "/api/mercy/cron?job=poll-orders",
+      "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/mercy/cron?job=niche-research",
+      "schedule": "0 16 * * 0"
+    },
+    {
+      "path": "/api/mercy/cron?job=donation-report",
+      "schedule": "0 14 1 * *"
     }
   ]
 }

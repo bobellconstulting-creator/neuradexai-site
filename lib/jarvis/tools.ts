@@ -74,6 +74,10 @@ import {
 } from './tools-web'
 import { sendEmail, sendEmailSchema, readEmail, readEmailSchema } from './tools-email'
 import { createEtsyListing, createEtsyListingSchema } from './tools-etsy'
+import {
+  createMeritAccount,
+  createMeritAccountSchema,
+} from './tools-accounts'
 import { findProspects, findProspectsSchema } from './tools-consulting'
 import { runClaudeCode, runClaudeCodeSchema } from './tools-claude-code'
 import {
@@ -1203,6 +1207,13 @@ export const JARVIS_TOOLS: Record<string, ToolEntry> = {
     description: 'Create a DRAFT product listing on Printify (Etsy POD). Draft only — not published until Bo reviews. Requires PRINTIFY_API_KEY and PRINTIFY_SHOP_ID env vars.',
     schema: createEtsyListingSchema,
     run: createEtsyListing,
+  },
+  createMeritAccount: {
+    name: 'createMeritAccount',
+    description:
+      'Create a new account on Printify, Etsy, Gumroad, or Pinterest using Playwright automation on Bo\'s local machine via the local bridge. Stores credentials in Vault automatically. Use when Bo asks to set up accounts for the Merit income agent, or says "create the Printify account" / "set up Etsy" / "create Gumroad account". Pinterest requires a manual step (no script).',
+    schema: createMeritAccountSchema,
+    run: createMeritAccount,
   },
   findProspects: {
     name: 'findProspects',
