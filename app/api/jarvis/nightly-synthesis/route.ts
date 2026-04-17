@@ -1,5 +1,6 @@
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300
 
 import { promises as fs } from 'node:fs'
 import path from 'node:path'

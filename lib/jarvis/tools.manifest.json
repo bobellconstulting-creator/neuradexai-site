@@ -181,6 +181,19 @@
       }
     },
     {
+      "name": "appendNote",
+      "description": "Append text to an existing file in the COG vault without overwriting. Creates the file if it doesn't exist. Prefer this over writeDoc with append=true for additive writes like logs, queues, and running notes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "Absolute path to the file" },
+          "content": { "type": "string", "description": "Text to append" }
+        },
+        "required": ["path", "content"],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "createCalendarEvent",
       "description": "Create a new event on Bo's Google Calendar.",
       "parameters": {
@@ -445,6 +458,105 @@
       }
     },
     {
+      "name": "sendEmail",
+      "description": "Send an email via Gmail SMTP (nodemailer). Use when Bo asks to email someone or send a notification. Requires SMTP_USER and SMTP_PASS env vars. dryRun=true logs the message without sending.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "to": { "type": "string", "format": "email", "description": "Recipient email address." },
+          "subject": { "type": "string", "minLength": 1, "maxLength": 998 },
+          "body": { "type": "string", "minLength": 1, "description": "Plain text email body." },
+          "replyTo": { "type": "string", "format": "email", "description": "Reply-to address. Defaults to SMTP_USER." },
+          "dryRun": { "type": "boolean", "description": "If true, log the email but do not send it.", "default": false }
+        },
+        "required": ["to", "subject", "body"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "readEmail",
+      "description": "Read recent emails from Gmail inbox via IMAP. Returns sender, subject, and snippet for each message. Use when Bo asks to check email, read inbox, or when a cron job monitors for new mail. Requires SMTP_USER and SMTP_PASS env vars with IMAP enabled.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "folder": { "type": "string", "description": "Mailbox folder to read. Default INBOX.", "default": "INBOX" },
+          "unreadOnly": { "type": "boolean", "description": "Only return unread messages.", "default": true },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "description": "Max messages to return. Default 10.", "default": 10 },
+          "sinceMinutes": { "type": "integer", "minimum": 1, "maximum": 1440, "description": "Only messages received in the last N minutes. Default 30.", "default": 30 }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "createEtsyListing",
+      "description": "Create a DRAFT product listing via the Printify API (free). Creates a draft only — not published to Etsy until Bo reviews and publishes from Printify dashboard. Requires PRINTIFY_API_KEY and PRINTIFY_SHOP_ID env vars.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 255, "description": "Product title." },
+          "description": { "type": "string", "minLength": 1, "maxLength": 5000, "description": "Product description." },
+          "tags": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 13, "description": "Up to 13 Etsy tags." },
+          "productType": { "type": "string", "enum": ["tshirt", "mug", "poster", "hoodie"], "description": "Product type. Maps to Printify blueprint: tshirt=5, mug=77, poster=446, hoodie=92." },
+          "imageUrl": { "type": "string", "format": "uri", "description": "URL of print-ready image (optional). Can be added in Printify later." },
+          "dryRun": { "type": "boolean", "description": "If true, return the payload without posting to Printify.", "default": false }
+        },
+        "required": ["title", "description", "tags", "productType"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "findProspects",
+      "description": "Research potential AI consulting prospects via web search and save structured findings to COG/04-projects/neuradex-consulting/prospects.md. Use when Bo says 'find me leads', 'research prospects', or 'who should I pitch'.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "niche": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Target niche/market, e.g. 'small business Kansas', 'real estate agencies midwest'. Defaults to 'small business AI automation midwest'." },
+          "count": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Number of prospects to find. Default 5.", "default": 5 }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "storeCredential",
+      "description": "Store or update a credential in the local vault (~/.secrets/jarvis-vault.json). Upserts by service slug. Use when Bo creates a new account or rotates a password. Passwords are never logged.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "service": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Service name, e.g. 'digitalocean'. Stored as lowercase slug." },
+          "username": { "type": "string", "minLength": 1, "description": "Username or email for this service." },
+          "password": { "type": "string", "minLength": 1, "description": "Password. Never logged or sent to Telegram." },
+          "notes": { "type": "string", "maxLength": 1000, "description": "Optional notes about this account." },
+          "url": { "type": "string", "format": "uri", "description": "Optional dashboard or login URL." }
+        },
+        "required": ["service", "username", "password"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "getCredential",
+      "description": "Retrieve a stored credential from the vault by service name. Returns username, password, url, notes, updatedAt. For tool use only — never surface passwords in Telegram messages.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "service": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Service name to look up, e.g. 'digitalocean'." }
+        },
+        "required": ["service"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "listCredentials",
+      "description": "List all services in the credential vault. Returns service names, usernames, urls, and timestamps. Passwords are NOT included.",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "localBridgeExec",
       "description": "Execute a shell command on Bo's local machine via the local bridge server. Use when shellExec is BLOCKED on Vercel. Requires LOCAL_BRIDGE_URL and LOCAL_BRIDGE_SECRET env vars to be set.",
       "parameters": {
@@ -454,6 +566,38 @@
           "timeout": { "type": "number", "description": "Timeout in seconds. Default 30, max 120." }
         },
         "required": ["cmd"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "runClaudeCode",
+      "description": "Spawn Claude Code CLI to complete a coding task, build a feature, fix a bug, or run an analysis. Returns the full output. Use when Bo asks to build something, fix code, or when a task requires writing/running code. Requires claude CLI on PATH.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": { "type": "string", "minLength": 1, "description": "The task/question to send to Claude Code." },
+          "cwd": { "type": "string", "description": "Working directory (default: C:/Users/bobel/projects/neuradexai)." },
+          "timeoutMs": { "type": "number", "description": "Timeout in milliseconds (default 120000)." }
+        },
+        "required": ["prompt"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "telegramPollIdeas",
+      "description": "Poll Telegram Bot API for new idea/capture/note messages from Bo (chat ID 7240677590). Strips the prefix and returns clean text. Automatically advances an offset file so messages are never reprocessed. Used by the jarvis-idea-capture cron (every 2 min). Requires TELEGRAM_BOT_TOKEN env var.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "maxMessages": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "default": 10,
+            "description": "Max idea messages to return in one poll. Default 10."
+          }
+        },
+        "required": [],
         "additionalProperties": false
       }
     }
