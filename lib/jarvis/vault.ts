@@ -20,6 +20,8 @@ import {
 } from './types'
 
 const VAULT_ROOT = process.env.JARVIS_VAULT_ROOT ?? 'C:/Users/bobel/COG'
+// Static context bundled in the repo — readable on Vercel when COG path is unavailable
+const STATIC_CONTEXT_DIR = path.join(process.cwd(), 'lib', 'jarvis', 'static-context')
 
 const DAILY_DIR = path.join(VAULT_ROOT, '01-daily')
 const PEOPLE_DIR = path.join(VAULT_ROOT, '06-people')
@@ -340,7 +342,7 @@ export async function promoteInstinct(instinct: Instinct): Promise<{
  * Non-throwing: all errors are logged and swallowed so the caller's
  * .catch() is the only handler needed.
  */
-export async function persistReflectionResult(result: ReflectionResult): Promise<void> {
+export async function persistReflectionResult(result: ReflectionResult, transcript = ''): Promise<void> {
   const today = new Date().toISOString().slice(0, 10)
 
   const tasks: Promise<unknown>[] = []
@@ -424,7 +426,7 @@ export async function persistReflectionResult(result: ReflectionResult): Promise
   await Promise.all(tasks)
 
   // Proactive pattern check — fire and forget
-  import('./proactive').then(m => m.checkAndTriggerPatterns(result)).catch(() => {})
+  import('./proactive').then(m => m.checkAndTriggerPatterns(result, transcript)).catch(() => {})
 }
 
 // ─── Read-side ─────────────────────────────────────────────────────────────
@@ -453,7 +455,19 @@ export async function listPromotedInstincts(limit: number): Promise<PersistedIns
     return i.confidence * recency
   }
 
-  return items.sort((a, b) => score(b) - score(a)).slice(0, limit)
+  const sorted = items.sort((a, b) => score(b) - score(a)).slice(0, limit)
+  if (sorted.length > 0) return sorted
+
+  // Vercel: COG path unavailable — parse static snapshot bundled in repo
+  const snapshot = await readIfExists(path.join(STATIC_CONTEXT_DIR, 'instincts-snapshot.md'))
+  if (!snapshot) return []
+  const sections = snapshot.split(/^---$/m).filter(s => s.trim())
+  const staticItems: PersistedInstinct[] = []
+  for (const section of sections) {
+    const parsed = parseInstinctFrontmatter(`---\n${section.trim()}`)
+    if (parsed) staticItems.push(parsed)
+  }
+  return staticItems.sort((a, b) => score(b) - score(a)).slice(0, limit)
 }
 
 /**
@@ -479,7 +493,10 @@ export async function listRecentDailyNotes(limit: number): Promise<Array<{ date:
  * Get current bo.md profile (full text). Returns empty string if missing.
  */
 export async function readBoProfile(): Promise<string> {
-  return (await readIfExists(BO_FILE)) ?? ''
+  const live = await readIfExists(BO_FILE)
+  if (live) return live
+  // Vercel: fall back to static snapshot bundled in repo
+  return (await readIfExists(path.join(STATIC_CONTEXT_DIR, 'bo-profile.md'))) ?? ''
 }
 
 // Exposed for the context-injector cache.
