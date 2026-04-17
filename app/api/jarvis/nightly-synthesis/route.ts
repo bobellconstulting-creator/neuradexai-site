@@ -5,6 +5,7 @@ export const maxDuration = 300
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { NextResponse } from 'next/server'
+import { callBridge, bridgeAvailable } from '@/lib/jarvis/bridge-client'
 
 const VAULT_ROOT = process.env.JARVIS_VAULT_ROOT ?? 'C:/Users/bobel/COG'
 const PROMOTED_DIR = path.join(VAULT_ROOT, '05-knowledge', 'instincts', 'promoted')
@@ -120,10 +121,18 @@ export async function GET(): Promise<NextResponse> {
     const today = todayUTC()
     const { brief, instinctsRead } = await buildBrief(today)
 
-    // Write synthesis file
-    const synthPath = path.join(DAILY_DIR, `${today}-synthesis.md`)
-    await fs.mkdir(DAILY_DIR, { recursive: true })
-    await fs.writeFile(synthPath, brief, 'utf8')
+    // Write synthesis file — route through bridge on Vercel, fall back to direct fs locally
+    const synthPath = `${VAULT_ROOT}/01-daily/${today}-synthesis.md`
+    let written = false
+    if (bridgeAvailable()) {
+      const br = await callBridge('writeDoc', { path: synthPath, content: brief }).catch(() => null)
+      written = br?.ok ?? false
+    }
+    if (!written) {
+      // Fallback: direct fs (works in local dev where DAILY_DIR is a real path)
+      await fs.mkdir(DAILY_DIR, { recursive: true })
+      await fs.writeFile(path.join(DAILY_DIR, `${today}-synthesis.md`), brief, 'utf8')
+    }
 
     // Send Telegram
     let sent = false
