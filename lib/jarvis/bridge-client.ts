@@ -6,6 +6,8 @@
  * Falls back to direct fs access when running locally without the bridge.
  */
 
+import { enqueue, queueAvailable } from './queue'
+
 const BRIDGE_URL    = process.env.JARVIS_BRIDGE_URL
 const BRIDGE_SECRET = process.env.JARVIS_BRIDGE_SECRET
 
@@ -47,6 +49,11 @@ export async function callBridge<T = unknown>(
     return json
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    // Bridge unreachable — queue the call if Redis is available
+    if (queueAvailable()) {
+      await enqueue({ tool: name, args, chatId: '' }).catch(() => {})
+      return { ok: false, error: 'Bridge offline — call queued, will run when PC wakes.' }
+    }
     return { ok: false, error: `Bridge call failed: ${msg}` }
   }
 }

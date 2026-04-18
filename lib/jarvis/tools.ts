@@ -88,6 +88,8 @@ import {
   listCredentials,
   listCredentialsSchema,
 } from './tools-vault'
+import { createHash } from 'node:crypto'
+import { sendTelegramText, getOwnerChatId } from './telegram'
 
 export {
   storeCredential,
@@ -1256,12 +1258,126 @@ export const JARVIS_TOOLS: Record<string, ToolEntry> = {
   },
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Phase 5 — failure detection + Telegram alert + dedupe
+//
+// Every failure (ok=false, or thrown exception) DMs Bo at @Doc_2_bot with
+// a truncated reason. 60s dedupe by tool_name + sha256(reason)[0:12] prevents
+// alert storms on a flapping tool. Unknown-tool-name is treated as a
+// caller/operator error (NOT a tool failure) — log only, no alert, per plan.
+//
+// dispatchTool has always promised "never throws". We preserve that invariant
+// by wrapping entry.run in try/catch and by swallowing every alert-path error.
+//
+// Dedupe state is module-scoped in-memory. Warm Next.js containers share it;
+// cold starts and multi-container fleets will re-alert. Phase 15 replaces
+// this with Upstash/Redis for cross-container reliability.
+// ──────────────────────────────────────────────────────────────────────────
+
+const ALERT_DEDUPE_WINDOW_MS = 60_000
+const ALERT_REASON_MAX_CHARS = 200
+const alertDedupe = new Map<string, number>()
+
+function buildDedupeKey(tool: string, reason: string): string {
+  const hash = createHash('sha256').update(reason).digest('hex').slice(0, 12)
+  return `${tool}:${hash}`
+}
+
+function shouldSuppressAlert(key: string, nowMs: number): boolean {
+  const last = alertDedupe.get(key)
+  if (last !== undefined && nowMs - last < ALERT_DEDUPE_WINDOW_MS) return true
+  alertDedupe.set(key, nowMs)
+  // Opportunistic GC — evict anything older than the window so the map
+  // cannot grow unbounded across a long-lived container.
+  if (alertDedupe.size > 256) {
+    for (const [k, ts] of alertDedupe) {
+      if (nowMs - ts > ALERT_DEDUPE_WINDOW_MS) alertDedupe.delete(k)
+    }
+  }
+  return false
+}
+
+function truncateReason(reason: string): string {
+  if (reason.length <= ALERT_REASON_MAX_CHARS) return reason
+  return reason.slice(0, ALERT_REASON_MAX_CHARS - 1) + '…'
+}
+
+/**
+ * Fire-and-forget Telegram alert. Never throws, never blocks the caller.
+ * Set JARVIS_TELEGRAM_ALERTS=0 to suppress real sends (used by the verify script).
+ */
+async function fireTelegramAlert(tool: string, reason: string): Promise<boolean> {
+  const body = `[JARVIS ERROR] tool=${tool} reason=${truncateReason(reason)}`
+
+  if (process.env.JARVIS_TELEGRAM_ALERTS === '0') {
+    // eslint-disable-next-line no-console
+    console.warn('[jarvis-alert:suppressed-env]', body)
+    return false
+  }
+
+  try {
+    const result = await sendTelegramText(getOwnerChatId(), body)
+    if (!result.sent) {
+      // eslint-disable-next-line no-console
+      console.warn('[jarvis-alert:send-failed]', result.error ?? 'unknown')
+      return false
+    }
+    return true
+  } catch (e: unknown) {
+    // Defensive: sendTelegramText should not throw, but never let the alert
+    // path cascade back into dispatchTool.
+    const msg = e instanceof Error ? e.message : String(e)
+    // eslint-disable-next-line no-console
+    console.error('[jarvis-alert:unexpected]', msg)
+    return false
+  }
+}
+
+/**
+ * Dedupe → fire-and-forget alert → append audit receipt. The audit line is
+ * written regardless of suppression so an operator can tell "never fired"
+ * from "suppressed by dedupe".
+ */
+async function handleFailureAlert(tool: string, reason: string): Promise<void> {
+  const key = buildDedupeKey(tool, reason)
+  const suppressed = shouldSuppressAlert(key, Date.now())
+
+  const detail = `alert=${suppressed ? 'suppressed(dedupe)' : 'sent'} :: ${reason}`
+  await appendReceipt(mkReceipt(tool, false, detail))
+
+  if (suppressed) return
+  void fireTelegramAlert(tool, reason)
+}
+
 export async function dispatchTool(name: string, args: unknown): Promise<ToolResult> {
   const entry = JARVIS_TOOLS[name]
   if (!entry) {
+    // Unknown-tool = operator/caller error. Log only — no alert (LLM
+    // hallucinations on tool names would otherwise spam Bo).
     const r = mkReceipt('dispatch', false, `unknown tool: ${name}`)
     await appendReceipt(r)
     return { ok: false, error: `unknown tool: ${name}`, receipt: r }
   }
-  return entry.run(args)
+
+  // Run the tool. Preserve the "dispatchTool never throws" invariant by
+  // catching every possible throw path (tool code, Zod parse, downstream I/O).
+  let result: ToolResult
+  try {
+    result = await entry.run(args)
+  } catch (e: unknown) {
+    const reason = getErrorMessage(e)
+    const receipt = mkReceipt(name, false, `thrown: ${reason}`)
+    await appendReceipt(receipt)
+    await handleFailureAlert(name, reason)
+    return { ok: false, error: reason, receipt }
+  }
+
+  // Success path untouched — the tool appended its own receipt already.
+  if (result.ok) return result
+
+  // Failure path — tool wrote its own receipt, we add an alert-audit line
+  // and fire (subject to the 60s dedupe window).
+  const reason = result.error ?? 'tool returned ok=false with no error message'
+  await handleFailureAlert(name, reason)
+  return result
 }

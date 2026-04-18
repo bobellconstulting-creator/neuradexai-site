@@ -1,41 +1,12 @@
 {
   "installCommand": "npm install --legacy-peer-deps",
   "crons": [
-    {
-      "path": "/api/jarvis/wakeup",
-      "schedule": "0 12 * * *"
-    },
-    {
-      "path": "/api/jarvis/wakeup",
-      "schedule": "0 0 * * *"
-    },
-    {
-      "path": "/api/jarvis/task-runner",
-      "schedule": "0 14 * * *"
-    },
-    {
-      "path": "/api/jarvis/instinct-review",
-      "schedule": "30 4 * * *"
-    },
-    {
-      "path": "/api/jarvis/nightly-synthesis",
-      "schedule": "0 5 * * *"
-    },
-    {
-      "path": "/api/jarvis/buckgrid-growth",
-      "schedule": "0 13 * * 0"
-    },
-    {
-      "path": "/api/mercy/cron?job=poll-orders",
-      "schedule": "0 15 * * *"
-    },
-    {
-      "path": "/api/mercy/cron?job=niche-research",
-      "schedule": "0 16 * * 0"
-    },
-    {
-      "path": "/api/mercy/cron?job=donation-report",
-      "schedule": "0 14 1 * *"
-    }
+    { "path": "/api/jarvis/wakeup",           "schedule": "0 12 * * *" },
+    { "path": "/api/jarvis/wakeup",           "schedule": "0 2 * * *"  },
+    { "path": "/api/jarvis/instinct-review",  "schedule": "30 4 * * *" },
+    { "path": "/api/jarvis/nightly-synthesis","schedule": "0 5 * * *"  },
+    { "path": "/api/jarvis/research-queue",   "schedule": "0 7 * * *"  },
+    { "path": "/api/jarvis/buckgrid-growth",  "schedule": "0 13 * * 0" },
+    { "path": "/api/jarvis/inbox-process",    "schedule": "0 14 * * *" }
   ]
 }

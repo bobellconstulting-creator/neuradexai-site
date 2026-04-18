@@ -17,6 +17,7 @@ import { appendTurn, getHistory, type Turn } from '@/lib/jarvis/conversation'
 import { reflect } from '@/lib/jarvis/reflector'
 import { invalidateMemoryCache } from '@/lib/jarvis/context-injector'
 import { persistReflectionResult } from '@/lib/jarvis/vault'
+import { sendTelegramText } from '@/lib/jarvis/telegram'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -60,14 +61,10 @@ function turnsToMessages(turns: Turn[]): Message[] {
 }
 
 async function sendTelegramReply(chatId: string, text: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN
-  if (!token) return
-  const trimmed = text.slice(0, 4096) // Telegram message limit
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text: trimmed }),
-  })
+  // Delegates to the shared helper in lib/jarvis/telegram.ts so tool-failure
+  // alerting (lib/jarvis/tools.ts) and any future caller share one code path.
+  // Contract unchanged: void return, silent failure.
+  await sendTelegramText(chatId, text)
 }
 
 // ── Context preamble (same as the main telegram route) ─────────────────────
@@ -101,12 +98,53 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const chatId = String(msg.chat.id)
   const senderId = String(msg.from?.id ?? '')
 
-  // Security: only respond to Bo
-  if (senderId !== BO_CHAT_ID && chatId !== BO_CHAT_ID) {
-    return NextResponse.json({ ok: true }) // silently ignore
+  // Security: allowlist check — Bo only (plus any env-configured IDs)
+  const ALLOWED = new Set([
+    BO_CHAT_ID,
+    ...(process.env.JARVIS_ALLOWED_CHAT_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  ])
+  if (!ALLOWED.has(senderId) && !ALLOWED.has(chatId)) {
+    // Log blocked attempt (non-fatal)
+    console.warn(`[telegram-webhook] blocked sender=${senderId} chat=${chatId}`)
+    return NextResponse.json({ ok: true }) // silently drop — don't leak error surface
   }
 
   let message = msg.text?.trim() ?? ''
+
+  // Handle Telegram voice messages — download + transcribe
+  if (!message && msg.voice?.file_id) {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN
+    if (botToken) {
+      try {
+        const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${msg.voice.file_id}`)
+        const fileData = (await fileRes.json()) as { result?: { file_path?: string } }
+        const filePath = fileData.result?.file_path
+        if (filePath) {
+          const audioRes = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`)
+          const audioBuffer = Buffer.from(await audioRes.arrayBuffer())
+          const groqKey = process.env.GROQ_API_KEY
+          if (groqKey) {
+            const form = new FormData()
+            form.append('file', new Blob([audioBuffer], { type: 'audio/ogg' }), 'voice.ogg')
+            form.append('model', 'whisper-large-v3-turbo')
+            form.append('language', 'en')
+            form.append('response_format', 'json')
+            const sttRes = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${groqKey}` },
+              body: form,
+              signal: AbortSignal.timeout(20_000),
+            })
+            if (sttRes.ok) {
+              const sttData = (await sttRes.json()) as { text?: string }
+              message = sttData.text?.trim() ?? ''
+            }
+          }
+        }
+      } catch { /* STT failure — fall through to empty message drop */ }
+    }
+  }
+
   if (!message) return NextResponse.json({ ok: true }) // ignore non-text (voice handled separately)
 
   // Strip voice:/va: prefix

@@ -13,6 +13,9 @@
  * Security: guarded by CRON_SECRET env var (set in Vercel, passed as Authorization header by Vercel).
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { dequeueAll } from '@/lib/jarvis/queue'
+import { callBridge } from '@/lib/jarvis/bridge-client'
+import { sendTelegramText } from '@/lib/jarvis/telegram'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -151,6 +154,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     await sendTelegramFallback(parsed.reply)
 
     console.log(`[wakeup] ${label} sent to Bo via Jarvis LLM`)
+
+    // ── Step 3: drain the offline queue ──
+    await drainQueue(CHAT_ID)
+
     return NextResponse.json({ ok: true, brief: parsed.reply, mode: nightly ? 'nightly' : 'morning' })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
@@ -158,6 +165,33 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     // ── Step 3: fallback — plain text ping ──
     await sendTelegramFallback(fallbackMsg)
+
+    // Still drain the queue even if brief failed
+    await drainQueue(CHAT_ID)
+
     return NextResponse.json({ ok: true, brief: fallbackMsg, fallback: true, error: msg, mode: nightly ? 'nightly' : 'morning' })
+  }
+}
+
+async function drainQueue(chatId: string): Promise<void> {
+  try {
+    const queued = await dequeueAll()
+    if (queued.length === 0) return
+
+    console.log(`[wakeup] draining ${queued.length} queued bridge call(s)`)
+    const results: string[] = []
+
+    for (const entry of queued) {
+      try {
+        const r = await callBridge(entry.tool, entry.args as Record<string, unknown>)
+        results.push(`${entry.tool}: ${r.ok ? 'ok' : r.error ?? 'fail'}`)
+      } catch (e) {
+        results.push(`${entry.tool}: error — ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+
+    await sendTelegramText(chatId, `Queue drained (${queued.length}): ${results.join(', ')}`)
+  } catch (e) {
+    console.error('[wakeup] queue drain failed:', e instanceof Error ? e.message : String(e))
   }
 }

@@ -35,5 +35,25 @@ module.exports = {
       max_restarts: 10,
       autorestart: true,
     },
+    {
+      // Local watchdog — polls Vercel every 15 min (Hobby plan blocks sub-daily crons).
+      // Calls /api/jarvis/watchdog which checks Groq, Gemini, and bridge health.
+      name: 'jarvis-watchdog',
+      script: 'scripts/local-watchdog.mjs',
+      cwd: 'C:/Users/bobel/projects/neuradexai',
+      cron_restart: '*/15 * * * *',
+      watch: false,
+      autorestart: false,
+    },
+    {
+      // Brain indexer — rebuilds COG semantic embeddings nightly at 2am.
+      name: 'jarvis-brain-index',
+      script: 'lib/jarvis/brain/indexer.ts',
+      interpreter: 'ts-node',
+      cwd: 'C:/Users/bobel/projects/neuradexai',
+      cron_restart: '0 2 * * *',
+      watch: false,
+      autorestart: false,
+    },
   ],
 }

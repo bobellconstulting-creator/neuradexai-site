@@ -24,6 +24,8 @@ import {
   readBoProfile,
   VAULT_PATHS,
 } from './vault'
+import { SOUL_FALLBACK, PROJECT_CONTEXT } from './static-context/constants'
+import { buildGroundTruth } from './context/ground-truth'
 
 import type { PersistedInstinct } from './types'
 import { getUpcomingEvents } from '../google/calendar'
@@ -114,7 +116,7 @@ async function loadSoul(): Promise<string> {
     try {
       soulCache = await readFile(SOUL_STATIC_PATH, 'utf8')
     } catch {
-      soulCache = `# Jarvis\n\nYou are Jarvis, Bo Bell's AI chief of operations.\n`
+      soulCache = SOUL_FALLBACK
     }
   }
   soulFetchedAt = Date.now()
@@ -535,10 +537,11 @@ function fitToBudget(
  * distinguish persona ground-truth from learned signal.
  */
 export async function buildJarvisSystemPrompt(): Promise<string> {
-  const [freshDay, vault, calendarBlock] = await Promise.all([
+  const [freshDay, vault, calendarBlock, groundTruth] = await Promise.all([
     isFreshDaySession(),
     getVaultCached(),
     buildCalendarBlock(),
+    buildGroundTruth(),
   ])
 
   // Choose the anchor: full SOUL on day-start, lean primary.md otherwise.
@@ -546,12 +549,16 @@ export async function buildJarvisSystemPrompt(): Promise<string> {
 
   const memorySection = fitToBudget(vault.bo, vault.instincts, vault.dailies, vault.topics, vault.knownTopics)
 
-  const parts: string[] = [anchor]
+  const parts: string[] = [anchor, PROJECT_CONTEXT]
 
   if (memorySection.trim()) {
     parts.push(
       `---\n\n# JARVIS LEARNED MEMORY (auto-injected from vault, max ${MEMORY_TOKEN_BUDGET} tokens)\n\n${memorySection}\n\n---\nEnd learned memory. Apply it as ground truth about Bo's preferences and history. Never repeat memory back unless asked.`,
     )
+  }
+
+  if (groundTruth.trim()) {
+    parts.push(groundTruth)
   }
 
   if (calendarBlock.trim()) {
