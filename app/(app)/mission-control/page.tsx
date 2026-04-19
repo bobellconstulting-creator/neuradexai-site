@@ -1,12 +1,18 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { TopBar } from '@/components/mission-control/TopBar'
 import { CalendarPanel } from '@/components/mission-control/CalendarPanel'
 import { TaskBoard } from '@/components/mission-control/TaskBoard'
 import { VoiceChat } from '@/components/mission-control/VoiceChat'
 import { FileDropzone } from '@/components/mission-control/FileDropzone'
+
+const VaultOrbGraph = dynamic(
+  () => import('@/components/mission-control/VaultOrbGraph'),
+  { ssr: false, loading: () => null }
+)
 
 // ─── Jarvis status hook ───────────────────────────────────────────────────────
 
@@ -69,7 +75,7 @@ function relativeTime(isoString: string | null): string {
 
 // ─── Tab type ─────────────────────────────────────────────────────────────────
 
-type Tab = 'chat' | 'tasks' | 'calendar' | 'docs'
+type Tab = 'chat' | 'tasks' | 'calendar' | 'docs' | 'vault'
 
 // ─── Jarvis card ─────────────────────────────────────────────────────────────
 
@@ -154,6 +160,7 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
     { id: 'tasks',    label: 'TASKS' },
     { id: 'calendar', label: 'CALENDAR' },
     { id: 'docs',     label: 'DOCS' },
+    { id: 'vault',    label: 'VAULT' },
   ]
 
   return (
@@ -264,6 +271,11 @@ export default function MissionControlPage() {
               {tab === 'docs' && (
                 <div className="h-full overflow-hidden">
                   <FileDropzone />
+                </div>
+              )}
+              {tab === 'vault' && (
+                <div className="h-full overflow-hidden">
+                  <VaultOrbGraph />
                 </div>
               )}
             </div>
